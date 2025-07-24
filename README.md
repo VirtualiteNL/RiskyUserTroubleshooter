@@ -53,7 +53,9 @@ Install-Module ExchangeOnlineManagement -Scope CurrentUser
 
 # Optional: unblock the script if downloaded from the internet
 Unblock-File .\riskyusertroubleshooter.ps1
-
+```ps1
+set-execution Bypass
+```
 
 ---
 
@@ -61,6 +63,9 @@ Unblock-File .\riskyusertroubleshooter.ps1
 
 ### Interactive
 
+```ps1
+set-execution Bypass
+```
 ```ps1
 .\riskyusertroubleshooter.ps1
 ```
