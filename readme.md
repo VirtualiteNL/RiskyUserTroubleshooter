@@ -106,6 +106,7 @@ The tool checks for and scores events based on:
 12. Shared IP between users
 13. Unexpected app category usage
 14. Signs of session hijacking
+15. Conditional Access coverage 🆕
 
 Each IOC increases the user or sign-in risk score and is visualized in the HTML report.
 
