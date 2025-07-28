@@ -42,16 +42,20 @@ function Get-UserAdminRoles {
     $directoryRoles = @()
 
     try {
+        Write-Host "📥 Retrieving activated directory roles..." -ForegroundColor Cyan
         # 📜 Retrieve every activated directory role in the tenant
         $allRoles = Get-MgDirectoryRole -All
+        Write-Log -Type "Information" -Message "📥 Retrieved directory roles for tenant."
     }
     catch {
-        Write-Warning "❌ Failed to retrieve directory roles: $_"
+        Write-Host "❌ Failed to retrieve directory roles." -ForegroundColor Red
+        Write-Log -Type "Error" -Message "❌ Failed to retrieve directory roles: $($_.Exception.Message)"
         return $directoryRoles    # return empty on error
     }
 
     foreach ($role in $allRoles) {
         try {
+            Write-Host "🔎 Checking members of role: $($role.DisplayName)" -ForegroundColor Gray
             # 👥 Enumerate members of the current role
             $members = Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -ErrorAction Stop
             foreach ($member in $members) {
@@ -62,13 +66,15 @@ function Get-UserAdminRoles {
                     }
 
                     # 📝 Log the matched role
-                    Write-Log -Type "Alert" -Message "User is a member of privileged role: $($role.DisplayName)"
+                    Write-Host "⚠️ User is a member of privileged role: $($role.DisplayName)" -ForegroundColor Yellow
+                    Write-Log -Type "Alert" -Message "⚠️ User is a member of privileged role: $($role.DisplayName)"
                     break  # no need to scan further members for this role
                 }
             }
         }
         catch {
-            # Silently continue on per‑role failures (API throttling / rights)
+            Write-Host "⚠️ Failed to retrieve members for role: $($role.DisplayName)" -ForegroundColor DarkYellow
+            Write-Log -Type "Error" -Message "⚠️ Failed to retrieve members for role $($role.DisplayName): $($_.Exception.Message)"
             continue
         }
     }

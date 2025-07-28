@@ -32,23 +32,43 @@
     ℹ️ Also licensed under Creative Commons BY-NC-SA 4.0 where compatible.
     See LICENSE.md for full terms.
 #>
-# 📁 Check all required powershell modules and install if missing
-. "$PSScriptRoot\modules\requirements.ps1"
-Ensure-RequiredModules
-
 # 🔹 Prompt the analyst for the UPN (User Principal Name) of the account under investigation
 $upn = Read-Host "Enter UPN of the user to investigate"
 if ([string]::IsNullOrWhiteSpace($upn)) {
-    # Abort if UPN is empty or invalid
-    Write-Host "UPN is required. Exiting..." -ForegroundColor Red
-    Write-Log -Type "Information" -Message "[Runner] Received UPN input: $upn"
+    Write-Host "❌ UPN is required. Exiting..." -ForegroundColor Red
+    Write-Log -Type "Alert" -Message "⚠️ Script aborted: no UPN entered by user."
     exit 1
 }
 
-# 📁 Import all required custom modules (utility, reporting, data collectors, API integration)
+# 📁 Load logger module first so logging is available immediately
+. "$PSScriptRoot\modules\logger.ps1"
+
+# 📂 Create folders and define paths
+$sanitizedUpn = $upn -replace '[^a-zA-Z0-9@._-]', '_'
+$logFolder    = Join-Path $PSScriptRoot "logs"
+$reportFolder = Join-Path $PSScriptRoot "reports"
+$exportFolder = Join-Path $PSScriptRoot "exports"
+$global:jsonExportFolder = Join-Path $PSScriptRoot "exports"
+
+if (-not (Test-Path $logFolder))    { New-Item -ItemType Directory -Path $logFolder    | Out-Null }
+if (-not (Test-Path $reportFolder)) { New-Item -ItemType Directory -Path $reportFolder | Out-Null }
+if (-not (Test-Path $exportFolder)) { New-Item -ItemType Directory -Path $exportFolder | Out-Null }
+
+$logPath    = Join-Path $logFolder    "incidentreport-$sanitizedUpn.txt"
+$reportPath = Join-Path $reportFolder "incidentreport-$sanitizedUpn.html"
+
+# 📑 Start log
+Start-Log -Path $logPath
+Write-Log -Type "Information" -Message "📊 Incident scan started."
+Write-Host "📊 Starting incident investigation..." -ForegroundColor Cyan
+
+# 📁 Check required modules
+. "$PSScriptRoot\modules\requirements.ps1"
+Ensure-RequiredModules
+
+# 📦 Load all custom modules
 . "$PSScriptRoot\modules\htmltools.ps1"
 . "$PSScriptRoot\modules\connect.ps1"
-. "$PSScriptRoot\modules\logger.ps1"
 . "$PSScriptRoot\modules\abuseipdb.ps1"
 . "$PSScriptRoot\modules\htmlbuilder.ps1"
 . "$PSScriptRoot\modules\userrisk.ps1"
@@ -57,19 +77,6 @@ if ([string]::IsNullOrWhiteSpace($upn)) {
 . "$PSScriptRoot\modules\exportreportdata.ps1"
 . "$PSScriptRoot\modules\openaiadvisory.ps1"
 . "$PSScriptRoot\modules\cleanup.ps1"
-
-# 📂 Create required folder structure
-$sanitizedUpn = $upn -replace '[^a-zA-Z0-9@._-]', '_'
-$logFolder    = Join-Path $PSScriptRoot "logs"
-$reportFolder = Join-Path $PSScriptRoot "reports"
-$exportFolder = Join-Path $PSScriptRoot "exports"
-$global:jsonExportFolder = Join-Path $PSScriptRoot "exports"
-
-# ✉️ Ensure the output folders exist
-if (-not (Test-Path $logFolder))    { New-Item -ItemType Directory -Path $logFolder    | Out-Null }
-if (-not (Test-Path $reportFolder)) { New-Item -ItemType Directory -Path $reportFolder | Out-Null }
-if (-not (Test-Path $exportFolder)) { New-Item -ItemType Directory -Path $exportFolder | Out-Null }
-
 
 # 🧠 Initialize advisory object
 $global:aiadvisory = @{
@@ -80,49 +87,38 @@ $global:aiadvisory = @{
     Advisory   = ""
 }
 
-
-# 📃 Define the full file paths for the report and corresponding log
-$logPath    = Join-Path $logFolder    "incidentreport-$sanitizedUpn.txt"
-$reportPath = Join-Path $reportFolder "incidentreport-$sanitizedUpn.html"
-
-# 📑 Begin writing log to file
-Start-Log -Path $logPath
-Write-Log -Type "Information" -Message "Incident scan started."
-
-Write-Log -Type "Information" -Message "[Runner] Initialized log folder: $logFolder"
-Write-Log -Type "Information" -Message "[Runner] Initialized report folder: $reportFolder"
-Write-Log -Type "Information" -Message "[Runner] Log path: $logPath"
-Write-Log -Type "Information" -Message "[Runner] Report path: $reportPath"
+Write-Log -Type "Information" -Message "📁 Log folder: $logFolder"
+Write-Log -Type "Information" -Message "📁 Report folder: $reportFolder"
+Write-Log -Type "Information" -Message "📄 Log path: $logPath"
+Write-Log -Type "Information" -Message "📄 Report path: $reportPath"
 
 try {
-    # 🔗 Establish connections to Microsoft Graph and Exchange Online
+    # 🔗 Connect to Microsoft 365
     Connect-GraphAndExchange
-    Write-Log -Type "Information" -Message "Connected to Microsoft Graph and Exchange."
+    Write-Log -Type "OK" -Message "🔗 Connected to Microsoft Graph and Exchange Online."
+    Write-Host "🔗 Connected to Microsoft 365" -ForegroundColor Green
 
-    # 🧋 Collect both user-based and sign-in-based risk assessments (HTML format)
-$userRiskContent   = Get-UserRiskSection -LogPath $logPath -UPN $upn
-$signinRiskContent = Get-SignInRiskSection -LogPath $logPath -UPN $upn
-    # 🔐 Export Conditional Access policies (needed for AI analysis)
-        Export-CAPolicies
+    # 📥 Collect data
+    Write-Host "📦 Loading and executing UserRisk IOC modules..." -ForegroundColor DarkCyan
+    $userRiskContent   = Get-UserRiskSection -LogPath $logPath -UPN $upn
+    Write-Host "📦 Loading and executing SignInRisk IOC modules..." -ForegroundColor DarkCyan
+    $signinRiskContent = Get-SignInRiskSection -LogPath $logPath -UPN $upn
 
-    # 📤 Export collected report data as JSON for reuse (e.g. AI advisory)
+    Export-CAPolicies
+
+    # 📤 Export to JSON
     $exportedJsonPath = Export-ReportDataToJson -ExportPath $reportFolder -UPN $upn
-    Write-Log -Type "Information" -Message "Exported report data to: $exportedJsonPath"
+    Write-Log -Type "OK" -Message "📤 Exported report data to: $exportedJsonPath"
 
-    # 🤖 Generate AI-powered advisory and risk summary
+    # 🤖 Advisory
     Invoke-OpenAIAdvisory
 
-    # 📌 Assemble HTML report sections
+    # 🧱 Assemble HTML report
     $Sections = @()
-
-# 📌 Assemble HTML report sections
-$Sections = @()
-
-# ⛰ Add AI advisory section if available
-if ($global:aiadvisory.Advisory) {
-    $Sections += Convert-AdvisoryToHtml -Text $global:aiadvisory.Advisory
-} else {
-    $Sections += @"
+    if ($global:aiadvisory.Advisory) {
+        $Sections += Convert-AdvisoryToHtml -Text $global:aiadvisory.Advisory
+    } else {
+        $Sections += @"
 <div class='warning'>
   <h4>⚠️ OpenAI Advisory Skipped</h4>
   <p>
@@ -132,29 +128,28 @@ if ($global:aiadvisory.Advisory) {
   </p>
 </div>
 "@
-}
+    }
 
-# 📆 Append other report sections
-$Sections += $userRiskContent
-$Sections += $signinRiskContent
+    $Sections += $userRiskContent
+    $Sections += $signinRiskContent
 
     Build-IncidentReport -Sections $Sections -OutputPath $reportPath -UserPrincipalName $upn
-    Write-Log -Type "Information" -Message "Report generated successfully."
+    Write-Host "🏁 Investigation finished. Report ready for review." -ForegroundColor Green
+    Write-Log  -Type "OK" -Message "🏁 Investigation finished. Report ready for review."
 
-    # 🔌 Disconnect sessions cleanly after data collection
+    # 🔌 Disconnect services
     Disconnect-MgGraph | Out-Null
-    Write-Log -Type "Information" -Message "Disconnected from Microsoft Graph."
+    Write-Log -Type "Information" -Message "🔌 Disconnected from Microsoft Graph."
 
     Disconnect-ExchangeOnline -Confirm:$false | Out-Null
-    Write-Log -Type "Information" -Message "Disconnected from Exchange Online."
+    Write-Log -Type "Information" -Message "🔌 Disconnected from Exchange Online."
 
-    # 🧹 POST-REPORT CLEANUP – Delete only this session's exported JSON files
+    # 🧹 Cleanup
     Invoke-PostReportCleanup -JsonPath $exportedJsonPath
     Invoke-PostReportCleanup -JsonPath $exportFolder
-
+    Write-Log -Type "Information" -Message "🧹 Temporary exports cleaned up."
 }
-
 catch {
-    # ⚠️ Catch any fatal errors and log for investigation
-    Write-Log -Type "Error" -Message "Fatal error: $_"
+    Write-Log -Type "Error" -Message "❌ Fatal error: $($_.Exception.Message)"
+    Write-Host "❌ Script failed. Check log file for details." -ForegroundColor Red
 }

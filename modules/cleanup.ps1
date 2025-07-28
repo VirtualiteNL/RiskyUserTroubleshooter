@@ -42,12 +42,10 @@ function Invoke-PostReportCleanup {
     $folderPath = if (Test-Path $JsonPath -PathType Leaf) {
         # If it's a file, clean its folder
         Split-Path $JsonPath -Parent
-    }
-    elseif (Test-Path $JsonPath -PathType Container) {
+    } elseif (Test-Path $JsonPath -PathType Container) {
         # If it's already a folder, use it
         $JsonPath
-    }
-    else {
+    } else {
         Write-Log -Type "Error" -Message "❌ Invalid path provided to cleanup: $JsonPath"
         return
     }
@@ -59,8 +57,7 @@ function Invoke-PostReportCleanup {
         try {
             Remove-Item $file.FullName -Force
             Write-Log -Type "Information" -Message "🗑️ Deleted JSON file: $($file.Name)"
-        }
-        catch {
+        } catch {
             Write-Log -Type "Error" -Message "❌ Failed to delete JSON file ${file.Name}: $($_.Exception.Message)"
         }
     }

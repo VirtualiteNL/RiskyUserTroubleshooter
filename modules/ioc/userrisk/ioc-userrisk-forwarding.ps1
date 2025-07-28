@@ -41,15 +41,19 @@ function Get-MailboxForwardingInfo {
     )
 
     try {
+        Write-Host "📬 Retrieving mailbox forwarding configuration for: $UPN" -ForegroundColor Cyan
+
         # 📬 Retrieve mailbox forwarding configuration (Exchange Online)
         $mailbox = Get-Mailbox -Identity $UPN -ErrorAction Stop
         $forwarding = $mailbox | Select-Object DisplayName, ForwardingSmtpAddress, DeliverToMailboxAndForward
 
+        Write-Host "✅ Forwarding address found: $($forwarding.ForwardingSmtpAddress)" -ForegroundColor Green
         Write-Log -Type "Information" -Message "📤 Retrieved forwarding settings for ${UPN}: $($forwarding.ForwardingSmtpAddress)"
+
         return $forwarding
     }
     catch {
-        # ❗ Log failure to retrieve forwarding data
+        Write-Host "❌ Failed to retrieve forwarding settings for: $UPN" -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Failed to retrieve forwarding info for ${UPN}: $($_.Exception.Message)"
         return $null
     }

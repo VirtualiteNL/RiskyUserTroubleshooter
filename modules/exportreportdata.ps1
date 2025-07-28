@@ -40,12 +40,13 @@ function Export-ReportDataToJson {
 
     # 🚫 Abort if the advisory object is not in memory
     if (-not $global:aiadvisory) {
-        Write-Log -Type "Error" -Message "No ReportData found in memory. Export aborted."
+        Write-Log -Type "Error" -Message "❌ No ReportData found in memory. Export aborted."
         return
     }
 
     # 📁 Ensure the export folder exists (create if missing)
     if (-not (Test-Path $ExportPath)) {
+        Write-Log -Type "Information" -Message "📁 Creating export folder: $ExportPath"
         New-Item -Path $ExportPath -ItemType Directory | Out-Null
     }
 
@@ -61,11 +62,11 @@ function Export-ReportDataToJson {
     try {
         # 💾 Convert advisory object to JSON and write to disk
         $global:aiadvisory | ConvertTo-Json -Depth 6 | Out-File -FilePath $fileName -Encoding UTF8
-        Write-Log -Type "Information" -Message "Exported report data to $fileName"
+        Write-Log -Type "Information" -Message "💾 Exported report data to: $fileName"
     }
     catch {
         # ❗ Log any export failure
-        Write-Log -Type "Error" -Message "Failed to export report data: $_"
+        Write-Log -Type "Error" -Message "❌ Failed to export report data: $($_.Exception.Message)"
     }
 
     # 📤 Return the generated filename to caller

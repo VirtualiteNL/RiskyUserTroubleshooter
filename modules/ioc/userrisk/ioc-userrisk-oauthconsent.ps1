@@ -40,9 +40,11 @@ function Get-UserOauthConsents {
 
     try {
         $grants = Get-MgUserOauth2PermissionGrant -UserId $UserId -ErrorAction Stop
+        Write-Host "🔑 Retrieved $($grants.Count) OAuth consents for user: $UserId" -ForegroundColor Gray
         Write-Log -Type "Information" -Message "✅ Retrieved $($grants.Count) OAuth consents for user $UserId"
         return $grants
     } catch {
+        Write-Host "❌ Failed to retrieve OAuth consents for $UserId" -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Failed to retrieve OAuth consents for user ${UserId}: $_"
         return @()
     }

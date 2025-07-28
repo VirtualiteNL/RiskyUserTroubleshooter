@@ -39,13 +39,18 @@ function Get-MailboxInboxRules {
     )
 
     try {
+        Write-Host "📥 Retrieving inbox rules for: $UPN" -ForegroundColor Cyan
+
         # 📥 Query Exchange Online for all inbox rules
         $rules = Get-InboxRule -Mailbox $UPN -ErrorAction Stop
+
+        Write-Host "✅ Retrieved $($rules.Count) inbox rules" -ForegroundColor Green
         Write-Log -Type "Information" -Message "📥 Retrieved $($rules.Count) inbox rules for ${UPN}"
+
         return $rules
     }
     catch {
-        # ❌ Log failure and return empty array
+        Write-Host "❌ Failed to retrieve inbox rules for: $UPN" -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Failed to retrieve inbox rules for ${UPN}: $($_.Exception.Message)"
         return @()
     }

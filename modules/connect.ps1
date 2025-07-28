@@ -34,7 +34,6 @@
 #>
 function Connect-GraphAndExchange {
     # 🔐 Define the required Microsoft Graph scopes
-    # These scopes provide access to logs, users, policies, auth methods, and risk data.
     $scopes = @(
         "AuditLog.Read.All",
         "User.Read.All",
@@ -47,16 +46,21 @@ function Connect-GraphAndExchange {
     )
 
     try {
-        # 📡 Connect to Microsoft Graph silently using delegated scopes
+        # 📡 Connect to Microsoft Graph
+        Write-Host "🌐 Connecting to Microsoft Graph..." -ForegroundColor Cyan
         Connect-MgGraph -Scopes $scopes -NoWelcome | Out-Null
-        Write-Log -Type "Information" -Message "Connected to Microsoft Graph with required scopes."
+        Write-Log -Type "OK" -Message "✅ Connected to Microsoft Graph with delegated scopes."
 
-        # ✉️ Connect to Exchange Online for mailbox analysis and forwarding rules
+        # ✉️ Connect to Exchange Online
+        Write-Host "📬 Connecting to Exchange Online..." -ForegroundColor Cyan
         Connect-ExchangeOnline -ShowBanner:$false | Out-Null
-        Write-Log -Type "Information" -Message "Connected to Exchange Online PowerShell session."
+        Write-Log -Type "OK" -Message "✅ Connected to Exchange Online PowerShell session."
+
+        Write-Host "🔗 All services connected successfully." -ForegroundColor Green
     } catch {
-        # ❌ Log and escalate any authentication errors
-        Write-Log -Type "Error" -Message "Failed to connect to Graph or Exchange: $_"
-        throw "❌ Connection to Microsoft Graph or Exchange Online failed: $_"
+        # ❌ Handle authentication failure
+        Write-Host "❌ Connection to Microsoft 365 failed." -ForegroundColor Red
+        Write-Log -Type "Error" -Message "❌ Connection failed: $($_.Exception.Message)"
+        throw "❌ Connection to Microsoft Graph or Exchange Online failed: $($_.Exception.Message)"
     }
 }

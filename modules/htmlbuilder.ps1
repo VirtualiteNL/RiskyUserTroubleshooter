@@ -39,14 +39,19 @@ function Build-IncidentReport {
         [Parameter(Mandatory)][string]$UserPrincipalName
     )
 
+    Write-Host "🛠️ Building HTML incident report for $UserPrincipalName..." -ForegroundColor Cyan
+    Write-Log -Type "Information" -Message "🛠️ Started HTML report generation for: $UserPrincipalName"
+
     # 🧠 Parse the advisory section into proper HTML format (if needed)
     if ($Sections[0] -match '<div class=''warning''>') {
-        # Already valid fallback HTML (warning message)
         $aiSummaryHtml = $Sections[0]
+        Write-Log -Type "Information" -Message "⚠️ Using fallback advisory HTML (warning block)."
     } elseif ($Sections[0] -notmatch '<div class=''advisory-section''>') {
         $aiSummaryHtml = Convert-AdvisoryToHtml -Text $Sections[0]
+        Write-Log -Type "Information" -Message "🔄 Advisory text converted to HTML via Convert-AdvisoryToHtml."
     } else {
         $aiSummaryHtml = $Sections[0]
+        Write-Log -Type "Information" -Message "✅ Advisory HTML already in correct format."
     }
 
     # ⚠️ Extract the user and sign-in risk sections
@@ -54,9 +59,9 @@ function Build-IncidentReport {
     $signInHtml   = $Sections[2]
 
     # 🪵 Log the length of each section for diagnostics
-    Write-Log -Type "Information" -Message "[HTML] Advisory section length: $($Sections[0].Length)"
-    Write-Log -Type "Information" -Message "[HTML] UserRisk section length:  $($Sections[1].Length)"
-    Write-Log -Type "Information" -Message "[HTML] SignIn section length:   $($Sections[2].Length)"
+    Write-Log -Type "Debug" -Message "📏 Advisory section length: $($Sections[0].Length)"
+    Write-Log -Type "Debug" -Message "📏 UserRisk section length:  $($Sections[1].Length)"
+    Write-Log -Type "Debug" -Message "📏 SignIn section length:   $($Sections[2].Length)"
 
     # 🧱 Construct final HTML content
     $html = @"
@@ -343,59 +348,65 @@ function Build-IncidentReport {
     });
   </script>
 </head>
-<body>
-  <header>
-    <h1>
-      <span class="title-primary">Risky User Troubleshooter</span>
-      <span class="title-tenant">$UserPrincipalName</span>
-    </h1>
-  <img src="../modules/virtualite.png" alt="Virtualite Logo">
-  </header>
+  <body>
+    <header>
+      <h1>
+        <span class="title-primary">Risky User Troubleshooter</span>
+        <span class="title-tenant">$UserPrincipalName</span>
+      </h1>
+      <img src="../modules/virtualite.png" alt="Virtualite Logo">
+    </header>
 
-  <nav>
-    <button onclick="showTab('summary')" class="active">🧠 OpenAI Advisory</button>
-    <button onclick="showTab('userrisk')">⚠️ User Risk</button>
-    <button onclick="showTab('signins')">📄 Sign-ins</button>
-  </nav>
+    <nav>
+      <button onclick="showTab('summary')" class="active">🧠 OpenAI Advisory</button>
+      <button onclick="showTab('userrisk')">⚠️ User Risk</button>
+      <button onclick="showTab('signins')">📄 Sign-ins</button>
+    </nav>
 
-  <div id="summary" class="tab-content active">
-    $aiSummaryHtml
-  </div>
-
-  <div id="userrisk" class="tab-content">
-    $userRiskHtml
-  </div>
-
-  <div id="signins" class="tab-content">
-"@
-  # 🕵️ Log and check if the AbuseIPDB API key warning flag is active
-  $abuseFlag = $global:ABUSEIPDB_APIKEY_WARNING -as [bool]
-  Write-Log -Type "Information" -Message "⚠️ AbuseIPDB API Key Warning Flag: $abuseFlag"
-
-  if ($abuseFlag) {
-    $html += @"
-    <div class='warning'>
-      <h4>⚠️ AbuseIPDB Reputation Check Skipped</h4>
-      <p>
-        The AbuseIPDB API key was not configured.<br>
-        All IP reputation scores were set to <code>0</code>, which may underestimate the actual risk.
-      </p>
+    <div id="summary" class="tab-content active">
+      $aiSummaryHtml
     </div>
+
+    <div id="userrisk" class="tab-content">
+      $userRiskHtml
+    </div>
+
+    <div id="signins" class="tab-content">
 "@
-}
 
-# 📄 Append sign-in HTML content
-$html += $signInHtml
+    # 🕵️ Log AbuseIPDB API key warning flag
+    $abuseFlag = $global:ABUSEIPDB_APIKEY_WARNING -as [bool]
+    Write-Log -Type "Information" -Message "⚠️ AbuseIPDB API Key Warning Flag: $abuseFlag"
 
-# 🧾 Close the HTML document
-$html += @"
-  </div>
-</body>
+    if ($abuseFlag) {
+        $html += @"
+      <div class='warning'>
+        <h4>⚠️ AbuseIPDB Reputation Check Skipped</h4>
+        <p>
+          The AbuseIPDB API key was not configured.<br>
+          All IP reputation scores were set to <code>0</code>, which may underestimate the actual risk.
+        </p>
+      </div>
+"@
+    }
+
+    # 📄 Append sign-in section
+    $html += $signInHtml
+
+    # 🧾 Final HTML close
+    $html += @"
+    </div>
+  </body>
 </html>
 "@
 
-# 💾 Write final HTML to file
-$html | Out-File -FilePath $OutputPath -Encoding UTF8
-Write-Log -Type "Information" -Message "✅ HTML report generated at: $OutputPath"
+    # 💾 Save the HTML report
+    try {
+        $html | Out-File -FilePath $OutputPath -Encoding UTF8
+        Write-Log -Type "OK" -Message "✅ HTML report successfully written to: $OutputPath"
+        Write-Host "✅ HTML report created: $OutputPath" -ForegroundColor Green
+    } catch {
+        Write-Log -Type "Error" -Message "❌ Failed to write HTML report: $($_.Exception.Message)"
+        Write-Host "❌ Failed to write HTML report. Check permissions or path." -ForegroundColor Red
+    }
 }
-

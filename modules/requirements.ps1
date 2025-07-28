@@ -33,79 +33,91 @@
     See LICENSE.md for full terms.
 #>
 function Ensure-RequiredModules {
-    param (
-        [string[]]$Modules = @(
-            "Microsoft.Graph.Authentication",
-            "Microsoft.Graph.Identity.SignIns",
-            "Microsoft.Graph.Users",
-            "Microsoft.Graph.Groups",
-            "Microsoft.Graph.Applications",
-            "ExchangeOnlineManagement"
-        )
+    $requiredModules = @(
+        "Microsoft.Graph",
+        "ExchangeOnlineManagement"
     )
 
-    Write-Host "`n🔍 Checking for required PowerShell modules..."
-
-    foreach ($module in $Modules) {
-        $installed = Get-InstalledModule -Name $module -ErrorAction SilentlyContinue
-
-        if (-not $installed) {
-            Write-Host "📦 Module '$module' not found. Installing..." -ForegroundColor Yellow
+    foreach ($module in $requiredModules) {
+        if (-not (Get-Module -ListAvailable -Name $module)) {
+            Write-Host "📦 Installing required module: $module..." -ForegroundColor Yellow
+            Write-Log -Type "Information" -Message "📦 Installing module: $module"
 
             try {
                 Install-Module -Name $module -Scope CurrentUser -Force -ErrorAction Stop
-                Write-Host "✅ Module '$module' installed successfully." -ForegroundColor Green
+                Write-Host "✅ Module installed: $module" -ForegroundColor Green
+                Write-Log -Type "OK" -Message "✅ Module installed: $module"
+            } catch {
+                Write-Host "`n❌ Failed to install module: $module" -ForegroundColor Red
+                Write-Log -Type "Error" -Message "❌ Failed to install module: $module – $($_.Exception.Message)"
+
+                if ($module -like "Microsoft.Graph*") {
+                    Write-Host "ℹ️ You can manually install the full Graph SDK using the following command:" -ForegroundColor Cyan
+                    Write-Host "`n   Install-Module Microsoft.Graph -Scope CurrentUser`n" -ForegroundColor White
+                    Write-Host "🔗 Learn more: https://learn.microsoft.com/powershell/microsoftgraph/installation" -ForegroundColor Cyan
+                } else {
+                    Write-Host "Please try installing it manually or check your internet connection or policy restrictions." -ForegroundColor Cyan
+                }
+                exit 1
             }
-            catch {
-                Write-Host "❌ Failed to install module '$module': $($_.Exception.Message)" -ForegroundColor Red
+        } else {
+            Write-Host "✔️ Module already available: $module" -ForegroundColor Gray
+            Write-Log -Type "OK" -Message "✔️ Module already available: $module"
+        }
+    }
+
+    # 📂 Load API key if exists
+    if (Test-Path "$PSScriptRoot\..\api\apikey_abuseipdb_local.ps1") {
+        . "$PSScriptRoot\..\api\apikey_abuseipdb_local.ps1"
+        Write-Log -Type "Information" -Message "🔑 Loaded local AbuseIPDB API key"
+    } elseif (Test-Path "$PSScriptRoot\..\api\apikey_abuseipdb.ps1") {
+        . "$PSScriptRoot\..\api\apikey_abuseipdb.ps1"
+        Write-Log -Type "Information" -Message "🔑 Loaded default AbuseIPDB API key"
+    }
+
+    # 🔐 Check if the API key is set correctly
+    if ($global:ABUSEIPDB_APIKEY -eq "your-api-key-here" -or [string]::IsNullOrWhiteSpace($global:ABUSEIPDB_APIKEY)) {
+        $global:ABUSEIPDB_APIKEY_WARNING = $true
+        Write-Host "⚠️ AbuseIPDB API key is not configured. This check will be skipped." -ForegroundColor Yellow
+        Write-Log -Type "Alert" -Message "⚠️ AbuseIPDB API key not configured. Abuse check will be skipped."
+    } else {
+        $global:ABUSEIPDB_APIKEY_WARNING = $false
+        Write-Host "✅ AbuseIPDB API key is configured correctly." -ForegroundColor Green
+        Write-Log -Type "OK" -Message "✅ AbuseIPDB API key is valid."
+}
+
+    # 🔍 Check if OpenAI API key is present
+    $global:OPENAI_APIKEY_WARNING = $false
+
+    try {
+        if (Test-Path "$PSScriptRoot\..\api\apikey_openai_local.ps1") {
+            . "$PSScriptRoot\..\api\apikey_openai_local.ps1"
+            Write-Log -Type "Information" -Message "🧠 Loaded local OpenAI API key"
+        } elseif (Test-Path "$PSScriptRoot\..\api\apikey_openai.ps1") {
+            . "$PSScriptRoot\..\api\apikey_openai.ps1"
+            Write-Log -Type "Information" -Message "🧠 Loaded default OpenAI API key"
+        } else {
+            Write-Host "⚠️ OpenAI API key file not found – analysis will be skipped." -ForegroundColor Yellow
+            Write-Log -Type "Alert" -Message "⚠️ OpenAI API key file not found. Advisory will be skipped."
+            $global:OPENAI_APIKEY_WARNING = $true
+            return
+        }
+
+        if ([string]::IsNullOrWhiteSpace($apiKey)) {
+            Write-Host "⚠️ OpenAI API key is not configured. This check will be skipped." -ForegroundColor Yellow
+            Write-Log -Type "Alert" -Message "⚠️ OpenAI API key not configured. Advisory will be skipped."
+            $global:OPENAI_APIKEY_WARNING = $true
+    } else {
+            Write-Host "✅ OpenAI API key loaded successfully." -ForegroundColor Green
+            Write-Log -Type "OK" -Message "✅ OpenAI API key loaded successfully."
             }
-        }
-        else {
-            Write-Host "✅ Module '$module' is already installed." -ForegroundColor Gray
-        }
     }
-
-# 📂 Load API key if exists
-if (Test-Path "$PSScriptRoot\..\api\apikey_abuseipdb_local.ps1") {
-    . "$PSScriptRoot\..\api\apikey_abuseipdb_local.ps1"
-} elseif (Test-Path "$PSScriptRoot\..\api\apikey_abuseipdb.ps1") {
-    . "$PSScriptRoot\..\api\apikey_abuseipdb.ps1"
-}
-# 🔐 Check if the API key is set correctly
-if ($global:ABUSEIPDB_APIKEY -eq "your-api-key-here" -or [string]::IsNullOrWhiteSpace($global:ABUSEIPDB_APIKEY)) {
-    $global:ABUSEIPDB_APIKEY_WARNING = $true
-    Write-Host "⚠️ AbuseIPDB API key is missing or placeholder value. Abuse checks may not work." -ForegroundColor Yellow
-} else {
-    $global:ABUSEIPDB_APIKEY_WARNING = $false
-    Write-Host "✅ AbuseIPDB API key is set correctly." -ForegroundColor Green
-}
-Write-Host "🔑 Current AbuseIPDB API key: $($global:ABUSEIPDB_APIKEY)" -ForegroundColor Cyan
-
-# 🔍 Check if OpenAI API key is present
-$global:OPENAI_APIKEY_WARNING = $false
-
-try {
-    if (Test-Path "$PSScriptRoot\..\api\apikey_openai_local.ps1") {
-        . "$PSScriptRoot\..\api\apikey_openai_local.ps1"
-    } elseif (Test-Path "$PSScriptRoot\..\api\apikey_openai.ps1") {
-        . "$PSScriptRoot\..\api\apikey_openai.ps1"
-    } else {
-        Write-Host "⚠️ OpenAI key file not found – OpenAI analysis will be skipped."
+    catch {
+        Write-Host "❌ Failed to load OpenAI API key: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Log -Type "Error" -Message "❌ Failed to load OpenAI API key: $($_.Exception.Message)"
         $global:OPENAI_APIKEY_WARNING = $true
-        return
     }
 
-    if ([string]::IsNullOrWhiteSpace($apiKey)) {
-        Write-Host "⚠️ OpenAI API key is empty – OpenAI analysis will be skipped."
-        $global:OPENAI_APIKEY_WARNING = $true
-    } else {
-        Write-Host "✅ OpenAI API key loaded successfully."
-    }
-}
-catch {
-    Write-Host "❌ Failed to check OpenAI API key: $($_.Exception.Message)"
-    $global:OPENAI_APIKEY_WARNING = $true
-}
-
-    Write-Host "✔️ Requirement checks complete.`n"
+    Write-Host "✔️ Requirement checks complete.`n" -ForegroundColor Cyan
+    Write-Log -Type "Information" -Message "🧪 Requirement checks complete."
 }

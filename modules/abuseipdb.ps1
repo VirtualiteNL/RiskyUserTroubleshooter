@@ -39,8 +39,9 @@ function Initialize-AbuseIpScores {
 
     $Global:AbuseIpCache = @{}
 
-
     $uniqueIps = $IpAddresses | Where-Object { $_ -and $_ -match '^\d{1,3}(\.\d{1,3}){3}$' } | Sort-Object -Unique
+
+    Write-Host "🔍 Starting AbuseIPDB lookup for $($uniqueIps.Count) unique IP(s)..." -ForegroundColor Cyan
     Write-Log -Type "Information" -Message "🧮 Initializing AbuseIPDB lookup for $($uniqueIps.Count) unique IPs"
 
     foreach ($ip in $uniqueIps) {
@@ -48,19 +49,23 @@ function Initialize-AbuseIpScores {
             $null = Get-AbuseIpScore -IpAddress $ip
         }
     }
+
+    Write-Host "✅ AbuseIPDB lookup completed." -ForegroundColor Green
+    Write-Log -Type "OK" -Message "✅ AbuseIPDB lookup completed for all unique IPs."
 }
+
 function Get-AbuseIpScore {
     param (
         [Parameter(Mandatory)][string]$IpAddress
     )
 
-    # ⏩ Check if score already cached
+    # ⏩ Use cached value if available
     if ($Global:AbuseIpCache.ContainsKey($IpAddress)) {
-    Write-Log -Type "Information" -Message "📦 Cached AbuseIPDB score for $IpAddress = $($Global:AbuseIpCache[$IpAddress])"
+        Write-Log -Type "Information" -Message "📦 Cached AbuseIPDB score for $IpAddress = $($Global:AbuseIpCache[$IpAddress])"
         return $Global:AbuseIpCache[$IpAddress]
     }
 
-    # 🔐 Load API key into global scope
+    # 🔐 Load API key from file
     $apiKeyLoaded = $false
     if (Test-Path "$PSScriptRoot\..\api\apikey_abuseipdb_local.ps1") {
         . "$PSScriptRoot\..\api\apikey_abuseipdb_local.ps1"
@@ -71,10 +76,12 @@ function Get-AbuseIpScore {
         Write-Log -Type "Information" -Message "🔑 Loaded AbuseIPDB key from default location."
         $apiKeyLoaded = $true
     } else {
+        Write-Host "⚠️ AbuseIPDB API key file not found – skipping IP check for $IpAddress" -ForegroundColor Yellow
         Write-Log -Type "Error" -Message "🚫 No AbuseIPDB API key file found – skipping check for $IpAddress"
+        return 0
     }
 
-    # 🌐 Prepare and send AbuseIPDB request
+    # 🌐 Send API request
     $uri = "https://api.abuseipdb.com/api/v2/check?ipAddress=$IpAddress&maxAgeInDays=30"
     $headers = @{
         Key    = $global:ABUSEIPDB_APIKEY
@@ -82,16 +89,17 @@ function Get-AbuseIpScore {
     }
 
     try {
-        Write-Log -Type "Information" -Message "🌐 Sending AbuseIPDB request for $IpAddress"
+        Write-Log -Type "Debug" -Message "🌐 Sending AbuseIPDB request for $IpAddress"
         $response = Invoke-RestMethod -Uri $uri -Method Get -Headers $headers -ErrorAction Stop
         $score = $response.data.abuseConfidenceScore
         $Global:AbuseIpCache[$IpAddress] = $score
-        Write-Log -Type "Information" -Message "✅ AbuseIPDB score received for $IpAddress = $score"
+
+        Write-Log -Type "OK" -Message "✅ AbuseIPDB score received for $IpAddress = $score"
         return $score
     }
     catch {
+        Write-Host "❌ Error retrieving AbuseIPDB score for $IpAddress – fallback score 0 used." -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Failed to retrieve AbuseIPDB score for ${IpAddress}: $($_.Exception.Message)"
-        Write-Warning "⚠️ AbuseIPDB API error for $IpAddress – assigning fallback score 0"
         $Global:AbuseIpCache[$IpAddress] = 0
         return 0
     }

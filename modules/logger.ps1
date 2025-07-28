@@ -32,6 +32,7 @@
     ℹ️ Also licensed under Creative Commons BY-NC-SA 4.0 where compatible.
     See LICENSE.md for full terms.
 #>
+
 # 🌍 Global variable used to store the current log file path
 $Global:LogFilePath = ""
 
@@ -42,6 +43,8 @@ function Start-Log {
     .DESCRIPTION
         This function sets the global path for logging and ensures that any existing file is removed.
         It is typically called at the beginning of a script to start a clean session log.
+    .PARAMETER Path
+        The full path to the new log file to create.
     #>
     param (
         [string]$Path
@@ -49,13 +52,18 @@ function Start-Log {
 
     $Global:LogFilePath = $Path
 
-    # 🗑️ Remove any existing file at the path to ensure a clean start
+    # 🗑️ Remove existing file if it exists
     if (Test-Path $Path) {
         Remove-Item $Path -Force
+        Write-Log -Type "Information" -Message "🗑️ Existing log file deleted at path: $Path"
     }
 
-    # 📄 Create a new log file to capture subsequent entries
+    # 📄 Create a new empty file
     New-Item -Path $Path -ItemType File -Force | Out-Null
+    Write-Log -Type "OK" -Message "📄 New log file created: $Path"
+
+    # 👁️ User feedback
+    Write-Host "📂 Log started at: $Path" -ForegroundColor Cyan
 }
 
 function Write-Log {
@@ -64,25 +72,24 @@ function Write-Log {
         🖊️ Writes a timestamped log entry to the configured log file.
     .DESCRIPTION
         Appends a structured log line with a severity type to the current session log file.
-        Supported types are: Alert, OK, Information, and Error.
+        Supported types are: Alert, OK, Information, Error, Debug.
     .PARAMETER Type
         The category or severity of the log entry.
     .PARAMETER Message
         The textual message to record in the log.
     #>
     param (
-        [ValidateSet("Alert", "OK", "Information", "Error")]
+        [ValidateSet("Alert", "OK", "Information", "Error", "Debug")]
         [string]$Type,
-
         [string]$Message
     )
 
-    # 🕒 Get current timestamp in standard format
+    # 🕒 Get current timestamp
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-    # 🧾 Format the log line consistently
+    # 🧾 Format log line (no emoji)
     $line = "[{0}] [{1}] {2}" -f $timestamp, $Type.ToUpper(), $Message
 
-    # 📝 Append the log line to the file
+    # 📝 Append to log file
     Add-Content -Path $Global:LogFilePath -Value $line
 }

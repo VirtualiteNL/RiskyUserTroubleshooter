@@ -41,17 +41,21 @@ function Test-NewUserAccount {
 
     try {
         $accountAgeDays = (New-TimeSpan -Start $CreatedDate -End (Get-Date)).Days
+        Write-Host "📆 Account created on: $CreatedDate ($accountAgeDays days ago)" -ForegroundColor Gray
         Write-Log -Type "Information" -Message "📆 Account creation date: $CreatedDate — Age in days: $accountAgeDays"
 
         if ($accountAgeDays -lt 7) {
+            Write-Host "⚠️ User account is NEW (younger than 7 days): $UPN" -ForegroundColor Yellow
             Write-Log -Type "Alert" -Message "🧾 UserRisk IOC 8 triggered – Account is younger than 7 days (${accountAgeDays} days): ${UPN}"
             return $true
         } else {
+            Write-Host "✅ Account is older than 7 days: $UPN" -ForegroundColor Green
             Write-Log -Type "OK" -Message "✅ Account is older than 7 days (${accountAgeDays} days): ${UPN}"
             return $false
         }
     }
     catch {
+        Write-Host "❌ Failed to check account age for $UPN" -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Failed to evaluate account age for ${UPN}: $($_.Exception.Message)"
         return $null
     }

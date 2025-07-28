@@ -31,8 +31,7 @@
 
     ℹ️ Also licensed under Creative Commons BY-NC-SA 4.0 where compatible.
     See LICENSE.md for full terms.
-#>
-function Get-UserPasswordResetEvents {
+#>function Get-UserPasswordResetEvents {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
@@ -46,6 +45,7 @@ function Get-UserPasswordResetEvents {
 
     # ✅ Ensure audit log is present
     if (-not $global:UserDirectoryAuditLogs) {
+        Write-Host "❌ Audit log not found for $UPN" -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Audit log not found in scope for ${UPN}"
         return @()
     }
@@ -63,6 +63,7 @@ function Get-UserPasswordResetEvents {
 
     # 📝 Log result with dynamic type
     $logType = if ($pwdEvents.Count -gt 0) { "Alert" } else { "OK" }
+    Write-Host "🔑 Password reset/change events for ${UPN}: $($pwdEvents.Count)" -ForegroundColor Gray
     Write-Log -Type $logType -Message "🔑 Password reset/change events found for ${UPN}: $($pwdEvents.Count)"
 
     return $pwdEvents

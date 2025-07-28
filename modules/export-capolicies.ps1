@@ -78,6 +78,7 @@ function Export-CAPolicies {
         # 📁 Export Conditional Access data as JSON to exports folder
         $exportFolder = Join-Path $PSScriptRoot "..\exports"
         if (-not (Test-Path $exportFolder)) {
+            Write-Log -Type "Information" -Message "📁 Creating exports folder: $exportFolder"
             New-Item -ItemType Directory -Path $exportFolder | Out-Null
         }
 

@@ -32,8 +32,8 @@
     ℹ️ Also licensed under Creative Commons BY-NC-SA 4.0 where compatible.
     See LICENSE.md for full terms.
 #>
-    # 🧠 Load application categorization helper (used for clustering & IOC analysis)
-    . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-appcategory.ps1"
+# 🧠 Load application categorization helper (used for clustering & IOC analysis)
+. "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-appcategory.ps1"
 
 function Get-SignInRiskSection {
     param (
@@ -69,7 +69,7 @@ function Get-SignInRiskSection {
     # 🧾 Log number of sign-ins retrieved for this user
     Write-Log -Type "Information" -Message "Sign-ins found: $($signins.Count)"
 
-        # 🔍 Load session anomaly module (adds flags to $signins)
+    # 🔍 Load session anomaly module (adds flags to $signins)
     . "$PSScriptRoot\sessions.ps1"
     Test-SignInSessionAnomalies -SignIns $signins
 
@@ -84,9 +84,9 @@ function Get-SignInRiskSection {
     if ($null -ne $signins -and $signins.Count -gt 0) {
         $riskWorkingHours = Get-UserWorkingHoursRange -SignIns $signins
     } else {
-        Write-Log -Type "Error" -Message "❌ Fatal error: No sign-in data found to calculate working hours."
+        Write-Log -Type "Error" -Message "Fatal error: No sign-in data found to calculate working hours."
         $riskWorkingHours = @{ Start = 8; End = 17 } # ⛔ Default fallback
-}
+    }
 
     # 🔗 Group similar sign-ins into logical clusters based on IP, app, location and timing
     . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-clustering.ps1"
@@ -100,7 +100,8 @@ function Get-SignInRiskSection {
     $deviantSignIns = Test-SignInOutsideWorkingHours -SignIns $signins -WorkingHours $riskWorkingHours -UPN $UPN
 
     # 🔗 Check if the sign-in is from a foreign IP and calculate AbuseIPDB score
-. "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-abuseasn.ps1"
+    . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-abuseasn.ps1"
+
     # 📊 Start the per-sign-in risk scoring and enrichment process
     foreach ($s in $signins) {
         $popupId   = "popup-" + ([guid]::NewGuid().ToString())
@@ -108,65 +109,64 @@ function Get-SignInRiskSection {
         $score     = 0
         $breakdown = @()
 
-    # 🌐 Query AbuseIPDB to retrieve risk score for IP
-    if ($ip) {
-        $abuseScore = Get-AbuseIpScore -IpAddress $ip
-        $s | Add-Member -NotePropertyName AbuseScore -NotePropertyValue $abuseScore -Force
-    }
+        # 🌐 Query AbuseIPDB to retrieve risk score for IP
+        if ($ip) {
+            $abuseScore = Get-AbuseIpScore -IpAddress $ip
+            $s | Add-Member -NotePropertyName AbuseScore -NotePropertyValue $abuseScore -Force
+        }
 
-    # 🔐 Load MFA failure detector module
-    . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-mfafailure.ps1"
-    $mfaFailScore = Test-SignInMfaFailure -SignIn $s -UPN $UPN
-    
-    # 🧮 Load baseline IOCs to compute individual IOC contributions to the risk score
-    . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-baselineiocs.ps1"
+        # 🔐 Load MFA failure detector module
+        . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-mfafailure.ps1"
+        $mfaFailScore = Test-SignInMfaFailure -SignIn $s -UPN $UPN
 
-    # 📊 Define the maximum theoretical IOC score model (only positive scoring IOCs are counted)
-    $possibleIocs = @(
-        @{ Name = "Sign-in failed at MFA stage after valid credentials were entered"; Points = 1 },   # 🔐 MFA challenge failed
-        @{ Name = "Legacy protocol (IMAP/POP/SMTP)"; Points = 2 }, # 📡 Legacy protocol usage
-        @{ Name = "Foreign IP + AbuseIPDB score"; Points = 3 }, # 🌍 Risky foreign IP
-        @{ Name = "No MFA used"; Points = 1 }, # ❌ MFA missing
-        @{ Name = "Conditional Access failure"; Points = 2 }, # 🚫 Conditional Access blocked
-        @{ Name = "Trusted device (AzureAD joined)"; Points = -2 }, # ✅ Trusted device
-        @{ Name = "Location: Netherlands"; Points = -2 }, # 🇳🇱 Local sign-in
-        @{ Name = "Compliant device"; Points = -3 }, # 🛡️ Compliant device
-        @{ Name = "Login outside working hours"; Points = 1 }, # ⏰ Time anomaly
-        @{ Name = "Suspicious IP (AbuseIPDB + ASN)"; Points = 2 }, # 🛰️ IP + ASN combined risk
-        @{ Name = "🌍 Country switch during session"; Points = 2 }, 
-        @{ Name = "🔁 Multiple IPs in session"; Points = 1 },
-        @{ Name = "💻 Device change in session"; Points = 1 }
-    )
+        # 🧮 Load baseline IOCs to compute individual IOC contributions to the risk score
+        . "$PSScriptRoot\..\modules\ioc\signin\ioc-signin-baselineiocs.ps1"
 
-    # 🔢 Calculate the maximum achievable score based on defined risk indicators
-    [int]$maxScoreModel = ($possibleIocs | Where-Object { $_.Points -gt 0 } | Measure-Object -Property Points -Sum).Sum                           
+        # 📊 Define the maximum theoretical IOC score model (only positive scoring IOCs are counted)
+        $possibleIocs = @(
+            @{ Name = "Sign-in failed at MFA stage after valid credentials were entered"; Points = 1 },
+            @{ Name = "Legacy protocol (IMAP/POP/SMTP)"; Points = 2 },
+            @{ Name = "Foreign IP + AbuseIPDB score"; Points = 3 },
+            @{ Name = "No MFA used"; Points = 1 },
+            @{ Name = "Conditional Access failure"; Points = 2 },
+            @{ Name = "Trusted device (AzureAD joined)"; Points = -2 },
+            @{ Name = "Location: Netherlands"; Points = -2 },
+            @{ Name = "Compliant device"; Points = -3 },
+            @{ Name = "Login outside working hours"; Points = 1 },
+            @{ Name = "Suspicious IP (AbuseIPDB + ASN)"; Points = 2 },
+            @{ Name = "🌍 Country switch during session"; Points = 2 },
+            @{ Name = "🔁 Multiple IPs in session"; Points = 1 },
+            @{ Name = "💻 Device change in session"; Points = 1 }
+        )
 
-    # ➕ Add IOC scoring results from modular sources
+        # 🔢 Calculate the maximum achievable score based on defined risk indicators
+        [int]$maxScoreModel = ($possibleIocs | Where-Object { $_.Points -gt 0 } | Measure-Object -Property Points -Sum).Sum
+
+        # ➕ Add IOC scoring results from modular sources
 
         # 🌐 Session anomaly scoring
-# 🚨 Add +2 risk score if any session anomaly flag is true (compound IOC)
-if ($s.Session_CountryChanged -or $s.Session_IPChanged -or $s.Session_DeviceChanged) {
-    $breakdown += @{ Name = "🚨 Session anomaly: IP/device/country mismatch"; Points = 5 }
-}
+        if ($s.Session_CountryChanged -or $s.Session_IPChanged -or $s.Session_DeviceChanged) {
+            $breakdown += @{ Name = "🚨 Session anomaly: IP/device/country mismatch"; Points = 5 }
+        }
 
-    # 🧱 Baseline IOC’s: ...
-    $baselineResults = Test-SignInBaselineIOCs -SignIn $s -WorkingHours $riskWorkingHours
-    $breakdown += $baselineResults
+        # 🧱 Baseline IOC’s: ...
+        $baselineResults = Test-SignInBaselineIOCs -SignIn $s -WorkingHours $riskWorkingHours
+        $breakdown += $baselineResults
 
-    # 🌍 External IP/ASN IOC check
-    $abuseResults = Test-SignInAbuseAsnRisk -SignIn $s -UPN $UPN
-    $breakdown += $abuseResults
+        # 🌍 External IP/ASN IOC check
+        $abuseResults = Test-SignInAbuseAsnRisk -SignIn $s -UPN $UPN
+        $breakdown += $abuseResults
 
-    # 🔐 Add only one of the related authentication IOCs based on severity
-    if ($mfaFailScore -eq 1) {
-        $breakdown += @{ Name = "Sign-in failed at MFA stage after valid credentials were entered"; Points = 3 }
-    }
-    elseif ($s.ConditionalAccessStatus -in @('failure','unknownFutureValue')) {
-        $breakdown += @{ Name = "Conditional Access failure"; Points = 2 }
-    }
-    elseif ($s.AuthenticationDetails.Count -eq 0) {
-        $breakdown += @{ Name = "No MFA used"; Points = 1 }
-    }
+        # 🔐 Add only one of the related authentication IOCs based on severity
+        if ($mfaFailScore -eq 1) {
+            $breakdown += @{ Name = "Sign-in failed at MFA stage after valid credentials were entered"; Points = 3 }
+        }
+        elseif ($s.ConditionalAccessStatus -in @('failure','unknownFutureValue')) {
+            $breakdown += @{ Name = "Conditional Access failure"; Points = 2 }
+        }
+        elseif ($s.AuthenticationDetails.Count -eq 0) {
+            $breakdown += @{ Name = "No MFA used"; Points = 1 }
+        }
 
         # 🧮 Calculate the total risk score for this sign-in session
         $score = ($breakdown | Measure-Object -Property Points -Sum).Sum
@@ -230,73 +230,74 @@ if ($s.Session_CountryChanged -or $s.Session_IPChanged -or $s.Session_DeviceChan
                 This may indicate session hijacking or inconsistent behavior across devices.
             </td></tr>
 "@
-}
+            }
 
-# 📋 Generate full popup content with sign-in metadata and scores
-$popupContent = @"
+        # 📋 Generate full popup content with sign-in metadata and scores
+        $popupContent = @"
 <table>
   <tr>
     <td><strong>Date</strong></td><td>$($s.CreatedDateTime)</td>
-    </tr>
-    <tr>
-        <td><strong>IP Address</strong></td>
-        <td>$($s.IpAddress)</td>
-    </tr>
+  </tr>
+  <tr>
+    <td><strong>IP Address</strong></td>
+    <td>$($s.IpAddress)</td>
+  </tr>
 "@ + $sessionRows + @"
-    <tr>
-        <td><strong>Impossible Travel</strong></td>
-        <td>$($s.ImpossibleTravelDetected -eq $true ? "Yes" : "No")</td>
-    </tr> 
-    <tr>
-        <td><strong>Location</strong></td><td>$($s.Location.City), $($s.Location.CountryOrRegion)</td></tr>
-    <tr>
-        <td><strong>App</strong></td>
-        <td>$($s.AppDisplayName)</td>
-    </tr>
-    <tr>
-        <td><strong>Client</strong></td>
-        <td>$($s.ClientAppUsed)</td>
-    </tr>
-    <tr>
-        <td><strong>OS</strong></td>
-        <td>$($s.DeviceDetail.OperatingSystem)</td>
-    </tr>
-    <tr>
-        <td><strong>Browser</strong></td>
-        <td>$($s.DeviceDetail.Browser)</td>
-    </tr>
-    <tr>
-        <td><strong>CA Status</strong></td>
-        <td>$($s.ConditionalAccessStatus)</td>
-    </tr>
-    <tr>
-        <td><strong>MFA Count</strong></td>
-        <td>$($s.AuthenticationDetails.Count)</td>
-    </tr>
-    <tr>
-        <td><strong>TrustType</strong></td>
-        <td>$($s.DeviceDetail.TrustType)</td>
-    </tr>
-    <tr>
-        <td><strong>AbuseIPDB</strong></td>
-        <td>
-            $($s.AbuseScore)
-            <span style='color:red; font-weight:bold;'>
-            $(if ($s.AbuseHighScore -and $s.ASNUntrusted) { "⚠️ Suspicious ASN" } else { "" })
-            </span>
-        </td>
-    </tr>
-    <tr>
-        <td><strong>Risk Level</strong></td>
-        <td>$($s.RiskLevel)</td>
-    </tr>
+  <tr>
+    <td><strong>Impossible Travel</strong></td>
+    <td>$($s.ImpossibleTravelDetected -eq $true ? "Yes" : "No")</td>
+  </tr> 
+  <tr>
+    <td><strong>Location</strong></td><td>$($s.Location.City), $($s.Location.CountryOrRegion)</td>
+  </tr>
+  <tr>
+    <td><strong>App</strong></td>
+    <td>$($s.AppDisplayName)</td>
+  </tr>
+  <tr>
+    <td><strong>Client</strong></td>
+    <td>$($s.ClientAppUsed)</td>
+  </tr>
+  <tr>
+    <td><strong>OS</strong></td>
+    <td>$($s.DeviceDetail.OperatingSystem)</td>
+  </tr>
+  <tr>
+    <td><strong>Browser</strong></td>
+    <td>$($s.DeviceDetail.Browser)</td>
+  </tr>
+  <tr>
+    <td><strong>CA Status</strong></td>
+    <td>$($s.ConditionalAccessStatus)</td>
+  </tr>
+  <tr>
+    <td><strong>MFA Count</strong></td>
+    <td>$($s.AuthenticationDetails.Count)</td>
+  </tr>
+  <tr>
+    <td><strong>TrustType</strong></td>
+    <td>$($s.DeviceDetail.TrustType)</td>
+  </tr>
+  <tr>
+    <td><strong>AbuseIPDB</strong></td>
+    <td>
+      $($s.AbuseScore)
+      <span style='color:red; font-weight:bold;'>
+        $(if ($s.AbuseHighScore -and $s.ASNUntrusted) { "⚠️ Suspicious ASN" } else { "" })
+      </span>
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Risk Level</strong></td>
+    <td>$($s.RiskLevel)</td>
+  </tr>
 </table>
 <h4>Score Calculation</h4>
 $scoreTable
 "@
 
-            # 🧱 Append completed popup to HTML collection
-$htmlPopups += @"
+        # 🧱 Append completed popup to HTML collection
+        $htmlPopups += @"
 <div id='$popupId' class='popup'>
   <div class='popup-header'>
     <h3>Sign-in details</h3>
@@ -308,24 +309,23 @@ $htmlPopups += @"
 </div>
 "@
 
-            # 📌 Add this sign-in to the list of risky entries for reporting
-            $riskySignIns += $s
-        }
+        # 📌 Add this sign-in to the list of risky entries for reporting
+        $riskySignIns += $s
     }
+}
 
-    # ✅ If no risky sign-ins were found, return a friendly message
-    if (-not $riskySignIns) {
-        return "<h2>Sign-In Risk Overview</h2><p>No risky sign-ins found.</p>"
-    }
+# ✅ If no risky sign-ins were found, return a friendly message
+if (-not $riskySignIns) {
+    return "<h2>Sign-In Risk Overview</h2><p>No risky sign-ins found.</p>"
+}
 
-    # 📋 Generate summary table and inject popups
-#$sessionAnomalyTypes = @()
+# 📋 Generate summary table and inject popups
 $allSignInsWithSessionAnomalies = $signins | Where-Object {
     $_.Session_CountryChanged -or $_.Session_IPChanged -or $_.Session_DeviceChanged
 }
 
 if ($allSignInsWithSessionAnomalies.Count -eq 0) {
-     # No anomalies – skip session summary block
+    # No anomalies – skip session summary block
     $sessionSummaryHtml = ""
 } else {
     $sessionSummaryHtml = @"
@@ -333,7 +333,7 @@ if ($allSignInsWithSessionAnomalies.Count -eq 0) {
   <strong>⚠️ Session anomalies detected in $($allSignInsWithSessionAnomalies.Count) sign-ins:</strong><br>
 </div>
 "@
-$sessionTable = @"
+    $sessionTable = @"
 <table style='margin-top: 10px; width:100%; border-collapse: collapse; font-size: 0.9em; border: 1px solid #ccc;'>
   <thead style='background-color: #f1f1f1;'>
     <tr>
@@ -347,61 +347,60 @@ $sessionTable = @"
   </thead>
   <tbody>
 "@
+    foreach ($s in $allSignInsWithSessionAnomalies | Sort-Object CreatedDateTime -Descending) {
+        $flags = @()
+        if ($s.Session_CountryChanged) { $flags += "🌍 Country switch" }
+        if ($s.Session_IPChanged)      { $flags += "🔁 IP change" }
+        if ($s.Session_DeviceChanged)  { $flags += "💻 Device change" }
+        $popup = if ($s.PopupId) {
+            "<a href='#' onclick=`"openPopup('$($s.PopupId)')`">🔍</a>"
+        } else {
+            "-"
+        }
 
-foreach ($s in $allSignInsWithSessionAnomalies | Sort-Object CreatedDateTime -Descending) {
-    $flags = @()
-    if ($s.Session_CountryChanged) { $flags += "🌍 Country switch" }
-    if ($s.Session_IPChanged)      { $flags += "🔁 IP change" }
-    if ($s.Session_DeviceChanged)  { $flags += "💻 Device change" }
-    $popup = if ($s.PopupId) {
-        "<a href='#' onclick=`"openPopup('$($s.PopupId)')`">🔍</a>"
-    } else {
-        "-"
+        $sessionTable += "<tr>
+            <td>$($s.CreatedDateTime)</td>
+            <td>$($s.IpAddress)</td>
+            <td>$($s.Location.CountryOrRegion)</td>
+            <td>$($s.AppDisplayName)</td>
+            <td>$($s.ClientAppUsed)</td>
+            <td>$($flags -join ', ')</td>
+        </tr>`n"
     }
 
-    $sessionTable += "<tr>
-        <td>$($s.CreatedDateTime)</td>
-        <td>$($s.IpAddress)</td>
-        <td>$($s.Location.CountryOrRegion)</td>
-        <td>$($s.AppDisplayName)</td>
-        <td>$($s.ClientAppUsed)</td>
-        <td>$($flags -join ', ')</td>
-    </tr>`n"
+    $sessionTable += "</tbody></table>"
+    $sessionSummaryHtml += $sessionTable
 }
 
-$sessionTable += "</tbody></table>"
-$sessionSummaryHtml += $sessionTable
-}
-    
 $html = @"
 <div class='advisory-section'>
   $sessionSummaryHtml
   <table class='advisory-table'>
-  <thead>
-    <tr>
-      <th>Date</th>
-      <th>IP Address</th>
-      <th>Location</th>
-      <th>App</th>
-      <th>AbuseIPDB</th>
-      <th>Score</th>
-      <th>Risk Level</th>
-    </tr>
-  </thead>
-  <tbody>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>IP Address</th>
+        <th>Location</th>
+        <th>App</th>
+        <th>AbuseIPDB</th>
+        <th>Score</th>
+        <th>Risk Level</th>
+      </tr>
+    </thead>
+    <tbody>
 "@
 
-    # 🎯 Filter sign-ins with a contextual risk score of 3 or higher
-    $filteredSignIns = $riskySignIns | Where-Object { $_.SignInScore -ge 3 }
+# 🎯 Filter sign-ins with a contextual risk score of 3 or higher
+$filteredSignIns = $riskySignIns | Where-Object { $_.SignInScore -ge 3 }
 
-    # 🚫 If no qualifying sign-ins exist, return fallback message
-    if (-not $filteredSignIns) {
-        return "<h2>Sign-In Risk Overview</h2><p>No sign-ins with score ≥ 4.</p>"
-    }
+# 🚫 If no qualifying sign-ins exist, return fallback message
+if (-not $filteredSignIns) {
+    return "<h2>Sign-In Risk Overview</h2><p>No sign-ins with score ≥ 4.</p>"
+}
 
-    # 🧱 Cluster risky sign-ins with similar patterns
-    # 🧩 First group by CorrelationId
-    $correlationGroups = Group-SignInsByCorrelationId -SignIns $filteredSignIns
+# 🧱 Cluster risky sign-ins with similar patterns
+# 🧩 First group by CorrelationId
+$correlationGroups = Group-SignInsByCorrelationId -SignIns $filteredSignIns
 
 # 🔗 Then cluster each group based on behavior
 $signInClusters = @()
@@ -409,31 +408,32 @@ foreach ($group in $correlationGroups) {
     $clusters = Group-SignInClusters -SignIns $group.SignIns
     $signInClusters += $clusters
 }
-    foreach ($cluster in ($signInClusters | Sort-Object -Property MaxRiskScore -Descending)) {
-        $s = $cluster.MainRecord
-        $subs = $cluster.SubRecords
-        $loc = "$($s.Location.City), $($s.Location.CountryOrRegion)"
-        $onclick = "onclick='openPopup(`"$($s.PopupId)`")' style='cursor:pointer;'"
-        $abuseLabel = if ($s.AbuseHighScore -and $s.ASNUntrusted) {
-            "<span style='color:red;' title='IOC 14: Abuse >70 + Unknown ASN'>⚠️ $($s.AbuseScore)</span>"
-        } else {
-            $s.AbuseScore
-        }
 
-        # 🔹 Add main sign-in entry row with popup link
-        $html += "<tr class='cluster-main' $onclick>
-            <td>$($s.CreatedDateTime)</td>
-            <td>$($s.IpAddress)</td>
-            <td>$loc</td>
-            <td>$($s.AppDisplayName)</td>
-            <td>$abuseLabel</td>
-            <td>$($s.SignInScore) / $maxScoreModel</td>
-            <td>$($s.RiskLevel)</td>
-        </tr>"
+foreach ($cluster in ($signInClusters | Sort-Object -Property MaxRiskScore -Descending)) {
+    $s = $cluster.MainRecord
+    $subs = $cluster.SubRecords
+    $loc = "$($s.Location.City), $($s.Location.CountryOrRegion)"
+    $onclick = "onclick='openPopup(`"$($s.PopupId)`")' style='cursor:pointer;'"
+    $abuseLabel = if ($s.AbuseHighScore -and $s.ASNUntrusted) {
+        "<span style='color:red;' title='IOC 14: Abuse >70 + Unknown ASN'>⚠️ $($s.AbuseScore)</span>"
+    } else {
+        $s.AbuseScore
+    }
 
-        # 🔸 Add collapsible section for similar sign-ins in same cluster
-        if ($subs.Count -gt 0) {
-            $subTable = @"
+    # 🔹 Add main sign-in entry row with popup link
+    $html += "<tr class='cluster-main' $onclick>
+        <td>$($s.CreatedDateTime)</td>
+        <td>$($s.IpAddress)</td>
+        <td>$loc</td>
+        <td>$($s.AppDisplayName)</td>
+        <td>$abuseLabel</td>
+        <td>$($s.SignInScore) / $maxScoreModel</td>
+        <td>$($s.RiskLevel)</td>
+    </tr>"
+
+    # 🔸 Add collapsible section for similar sign-ins in same cluster
+    if ($subs.Count -gt 0) {
+        $subTable = @"
 <tr class='cluster-details'>
   <td colspan='7' style='background-color: #f9f9f9; border-top: 2px solid #0078d4; padding: 8px 12px;'>
     <details style='margin: 5px 0;'>
@@ -452,32 +452,33 @@ foreach ($group in $correlationGroups) {
         </thead>
         <tbody>
 "@
-            foreach ($sub in $subs) {
-                $subCity = if ($sub.Location.City) { $sub.Location.City } else { 'Unknown' }
-                $subCountry = if ($sub.Location.CountryOrRegion) { $sub.Location.CountryOrRegion } else { 'Unknown' }
-                $subLoc = "$subCity, $subCountry"
-                $subPopup = if ($sub.PopupId) {
-                    "<a href='#' onclick=`"openPopup('$($sub.PopupId)')`">🔍</a>"
-                } else {
-                    "-"
-                }
-                $subTable += "<tr><td>$($sub.CreatedDateTime)</td><td>$($sub.AppDisplayName)</td><td>$subLoc</td><td>$($sub.ClientAppUsed)</td><td>$($sub.SignInScore)</td><td>$($sub.RiskLevel)</td><td>$subPopup</td></tr>`n"
+        foreach ($sub in $subs) {
+            $subCity = if ($sub.Location.City) { $sub.Location.City } else { 'Unknown' }
+            $subCountry = if ($sub.Location.CountryOrRegion) { $sub.Location.CountryOrRegion } else { 'Unknown' }
+            $subLoc = "$subCity, $subCountry"
+            $subPopup = if ($sub.PopupId) {
+                "<a href='#' onclick=`"openPopup('$($sub.PopupId)')`">🔍</a>"
+            } else {
+                "-"
             }
+            $subTable += "<tr><td>$($sub.CreatedDateTime)</td><td>$($sub.AppDisplayName)</td><td>$subLoc</td><td>$($sub.ClientAppUsed)</td><td>$($sub.SignInScore)</td><td>$($sub.RiskLevel)</td><td>$subPopup</td></tr>`n"
+        }
 
-            $subTable += @"
+        $subTable += @"
         </tbody>
       </table>
     </details>
   </td>
 </tr>
 "@
-            $html += $subTable
-        }
+        $html += $subTable
     }
+}
 
     # 🧠 Build JSON structure for OpenAI SignInRisk summary  
     #    – Only include sign-ins with a contextual score ≥ 2
     $allSignInsForAI = $riskySignIns | Where-Object { $_.SignInScore -ge 2 }
+    Write-Log -Type "Information" -Message "🧠 Preparing AI sign-in report for $($allSignInsForAI.Count) entries with score ≥ 2"
 
     # 📦 Initialise top-level JSON container
     $aisigninriskreport = @{
@@ -488,28 +489,28 @@ foreach ($group in $correlationGroups) {
 
         # 📝 Map the key sign-in fields to a flat object for AI consumption
         $entry = @{
-            Time            = $s.CreatedDateTime                               # ISO timestamp
-            IP              = $s.IPAddress                                     # Source IP
-            ImpossibleTravel = if ($s.ImpossibleTravelDetected) { "Yes" } else { "No" } # Impossible travel flag
-            City            = $s.Location.City                                 # City (may be empty)
-            Country         = $s.Location.CountryOrRegion                      # Country (may be empty)
-            App             = $s.AppDisplayName                                # Application name
-            Client          = $s.ClientAppUsed                                 # Client platform
-            OperatingSystem = $s.DeviceDetail.OperatingSystem                 # OS reported by sign-in
-            Browser         = $s.DeviceDetail.Browser                          # Browser string
-            TrustType       = $s.DeviceDetail.TrustType                        # AzureAD / ServerAD / etc.
-            IsCompliant     = $s.DeviceDetail.IsCompliant                      # Intune compliance flag
-            CAStatus        = $s.ConditionalAccessStatus                       # CA result (success/failure)
-            MFAUsed         = if ($s.AuthenticationDetails.Count -eq 0) { "None" } else { "$($s.AuthenticationDetails.Count)x" }  # MFA factor count
-            MFAFailure      = if ($s.Status.FailureReason -like "*multifactor*" -or $s.Status.ErrorCode -in 500121,50074) { "Yes" } else { "No" }  # MFA fail flag
-            AbuseScore      = $s.AbuseScore                                    # Raw AbuseIPDB score
-            AbuseASN        = $s.ASN                                           # ASN from AbuseIPDB
-            ASNTrusted      = if ($s.ASNUntrusted) { "No" } else { "Yes" }     # Trusted vs untrusted ASN
-            RiskLevel       = $s.RiskLevel                                     # High / Medium / Low
-            Score           = $s.SignInScore                                   # Calculated IOC score
-            MaxScore        = $s.MaxScore                                      # Max possible score
-            TimeOfDay       = ([datetime]$s.CreatedDateTime).ToLocalTime().ToString("HH:mm")  # Local time (for clustering)
-            RiskFactors     = @()                                              # Populated in inner loop below
+            Time            = $s.CreatedDateTime
+            IP              = $s.IPAddress
+            ImpossibleTravel = if ($s.ImpossibleTravelDetected) { "Yes" } else { "No" }
+            City            = $s.Location.City
+            Country         = $s.Location.CountryOrRegion
+            App             = $s.AppDisplayName
+            Client          = $s.ClientAppUsed
+            OperatingSystem = $s.DeviceDetail.OperatingSystem
+            Browser         = $s.DeviceDetail.Browser
+            TrustType       = $s.DeviceDetail.TrustType
+            IsCompliant     = $s.DeviceDetail.IsCompliant
+            CAStatus        = $s.ConditionalAccessStatus
+            MFAUsed         = if ($s.AuthenticationDetails.Count -eq 0) { "None" } else { "$($s.AuthenticationDetails.Count)x" }
+            MFAFailure      = if ($s.Status.FailureReason -like "*multifactor*" -or $s.Status.ErrorCode -in 500121,50074) { "Yes" } else { "No" }
+            AbuseScore      = $s.AbuseScore
+            AbuseASN        = $s.ASN
+            ASNTrusted      = if ($s.ASNUntrusted) { "No" } else { "Yes" }
+            RiskLevel       = $s.RiskLevel
+            Score           = $s.SignInScore
+            MaxScore        = $s.MaxScore
+            TimeOfDay       = ([datetime]$s.CreatedDateTime).ToLocalTime().ToString("HH:mm")
+            RiskFactors     = @()
         }
 
         # ➕ Add individual IOC applicability flags
@@ -524,7 +525,6 @@ foreach ($group in $correlationGroups) {
         $aisigninriskreport.SignIns += $entry
     }
 
-
     # 🔧 Determine the root folder dynamically (2 levels up from this module)
     $modulePath   = $PSScriptRoot
     $rootFolder   = Split-Path -Path (Split-Path -Path $modulePath -Parent) -Parent
@@ -532,6 +532,7 @@ foreach ($group in $correlationGroups) {
 
     # 📂 Ensure the export folder exists
     if (-not (Test-Path $exportFolder)) {
+        Write-Log -Type "Information" -Message "📂 Creating export folder: $exportFolder"
         New-Item -Path $exportFolder -ItemType Directory -Force | Out-Null
     }
 

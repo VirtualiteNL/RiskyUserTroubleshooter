@@ -40,6 +40,8 @@ function Get-UserMfaMethods {
 
     $methods = @()
 
+    Write-Host "🔐 Retrieving MFA methods for user: $UserId" -ForegroundColor Cyan
+
     try {
         # 📱 Phone/SMS or voice call MFA
         $phones = Get-MgUserAuthenticationPhoneMethod -UserId $UserId -ErrorAction SilentlyContinue
@@ -82,13 +84,16 @@ function Get-UserMfaMethods {
         }
 
         if ($methods.Count) {
-            Write-Log -Type Information -Message "Found $($methods.Count) MFA method(s) for user $UserId"
+            Write-Host "✅ Found $($methods.Count) MFA method(s) for $UserId" -ForegroundColor Green
+            Write-Log -Type "Information" -Message "Found $($methods.Count) MFA method(s) for user $UserId"
         } else {
-            Write-Log -Type Warning -Message "No MFA methods registered for user $UserId"
+            Write-Host "⚠️ No MFA methods registered for $UserId" -ForegroundColor Yellow
+            Write-Log -Type "Warning" -Message "No MFA methods registered for user $UserId"
         }
     }
     catch {
-        Write-Log -Type Error -Message "Failed to enumerate MFA methods for user ${UserId}: $_"
+        Write-Host "❌ Failed to enumerate MFA methods for $UserId" -ForegroundColor Red
+        Write-Log -Type "Error" -Message "Failed to enumerate MFA methods for user ${UserId}: $_"
     }
 
     return $methods

@@ -38,6 +38,8 @@ function Get-RecentMfaChanges {
         [Parameter(Mandatory)][string]$UPN
     )
 
+    Write-Host "🔍 Checking recent MFA changes for $UPN..." -ForegroundColor Cyan
+
     try {
         # 📥 Fetch all audit log entries for the user
         $adminChanges = Get-MgAuditLogDirectoryAudit -Filter "targetResources/any(t:t/userPrincipalName eq '$UPN')" -All
@@ -48,11 +50,13 @@ function Get-RecentMfaChanges {
             $_.ActivityDateTime -gt (Get-Date).AddDays(-7)
         }
 
+        Write-Host "✅ Found $($recentMfaChanges.Count) recent MFA changes for $UPN" -ForegroundColor Green
         Write-Log -Type "Information" -Message "✅ Retrieved $($recentMfaChanges.Count) recent MFA changes for $UPN"
         return $recentMfaChanges
     }
     catch {
-    Write-Log -Type "Error" -Message "❌ Failed to retrieve recent MFA changes for ${UPN}: $($_.Exception.Message)"
+        Write-Host "❌ Failed to retrieve recent MFA changes for $UPN" -ForegroundColor Red
+        Write-Log -Type "Error" -Message "❌ Failed to retrieve recent MFA changes for ${UPN}: $($_.Exception.Message)"
         return @()
     }
 }
