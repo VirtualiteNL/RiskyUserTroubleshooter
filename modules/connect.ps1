@@ -49,13 +49,10 @@ function Connect-GraphAndExchange {
         # 📡 Connect to Microsoft Graph
         Write-Host "🌐 Connecting to Microsoft Graph..." -ForegroundColor Cyan
         Connect-MgGraph -Scopes $scopes -NoWelcome | Out-Null
-        Write-Log -Type "OK" -Message "✅ Connected to Microsoft Graph with delegated scopes."
 
         # ✉️ Connect to Exchange Online
         Write-Host "📬 Connecting to Exchange Online..." -ForegroundColor Cyan
         Connect-ExchangeOnline -ShowBanner:$false | Out-Null
-        Write-Log -Type "OK" -Message "✅ Connected to Exchange Online PowerShell session."
-
         Write-Host "🔗 All services connected successfully." -ForegroundColor Green
     } catch {
         # ❌ Handle authentication failure

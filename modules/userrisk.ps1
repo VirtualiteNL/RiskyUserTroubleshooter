@@ -116,11 +116,21 @@ function Get-UserRiskSection {
         # 🔐 Retrieve all active MFA methods registered for this user
         $activeMfa = Get-UserMfaMethods -UserId $user.Id
 
-        # 📥 Import the module that enumerates OAuth2 app consents
+        # 📥 Retrieve OAuth consent data from audit log
         . "$PSScriptRoot\..\modules\ioc\userrisk\ioc-userrisk-oauthconsent.ps1"
-        # 🔄 Retrieve all OAuth2 application consents granted by the user
-        $oauthApps = Get-UserOauthConsents -UserId $user.Id
+        $oauthApps = Get-UserOauthConsents -UPN $user.UserPrincipalName
 
+        if (-not $global:aiadvisory.UserRisk) {
+            $global:aiadvisory.UserRisk = @{}
+        }
+        $global:aiadvisory.UserRisk.Consents = $oauthApps
+
+        # 🧠 Add to risk indicators
+        $riskIndicators += @{
+            Name      = "OAuth consents"
+            Condition = ($oauthApps.Count -gt 0)
+            Points    = $oauthApps.Count
+        }
         # 📥 Import the module that detects admin role memberships 
         . "$PSScriptRoot\..\modules\ioc\userrisk\ioc-userrisk-adminrole.ps1"
         # 👮 Retrieve all admin roles assigned to this user
@@ -154,7 +164,7 @@ function Get-UserRiskSection {
             @{ Name = "Mailbox shared with others";Condition = ($delegates.Count -gt 0); Points = 1 },
             @{ Name = "Forwarding enabled";        Condition = ($forwarding.ForwardingSmtpAddress); Points = 2 },
             @{ Name = "Suspicious inbox rules";    Condition = ($rules | Where-Object { $_.ForwardTo -or $_.RedirectTo -or $_.DeleteMessage }).Count -gt 0; Points = 1 },
-            @{ Name = "OAuth consent granted";     Condition = ($oauthApps.Count -gt 0); Points = 2 },
+            @{ Name = "OAuth consents"; Condition = ($oauthApps.Count -gt 0); Points = 2 }
             @{ Name = "Active admin role";         Condition = ($directoryRoles.Count -gt 0); Points = 1 },
             @{ Name = "Account < 7 days old";      Condition = $isNewAccount; Points = 2 },
             @{ Name = "Password reset <30 days";   Condition = ($pwdEvents.Count -gt 0); Points = 1 }
@@ -251,9 +261,12 @@ function Get-UserRiskSection {
                         }
                     )
                 }
-                "OAuth consent granted" {
-                    $popupContent = Convert-ToHtmlTable ($oauthApps | Select ClientId, Scope, ConsentType)
+                "OAuth consents" {
+                    $popupContent = Convert-ToHtmlTable (
+                        $global:aiadvisory.UserRisk.Consents | Select Display, Consent, RiskLevel
+                    )
                 }
+
                 "Active admin role" {
                     $popupContent = Convert-ToHtmlTable ($directoryRoles | Select RoleName)
                 }

@@ -1,51 +1,89 @@
-<#
-.SYNOPSIS
-    📊 Microsoft 365 Risky User Troubleshooter
-
-.DESCRIPTION
-    This script connects to Microsoft 365 (via Graph API and Exchange Online),
-    collects data on a risky user. The output is a Fluent UI-style HTML dashboard
-    with popups, summaries, and optional AI-generated advisory.
-
-.AUTHOR
-    👤 Danny Vorst (@Virtualite.nl)
-    💼 https://virtualite.nl | 🔗 https://github.com/VirtualiteNL
-
-.LICENSE
-    🔐 Microsoft 365 Risky User Troubleshooter – Copyright & License
-
-    This script is developed and maintained by Danny Vorst (Virtualite.nl).
-    It is licensed for **non-commercial use only**.
-
-    🟢 Allowed:
-    - Free to use internally for reporting, monitoring, or educational purposes
-    - Forks or modifications are allowed **only if published publicly** (e.g., on GitHub)
-    - Author name, styling, logo and script headers must remain unchanged
-
-    🔴 Not allowed:
-    - Commercial use, resale, or integration in closed-source tooling
-    - Removing Virtualite branding, layout, or author headers
-
-    ⚠️ By using this script, you agree to the license terms.
-    Violations may result in takedown notices, DMCA reports, or legal action.
-
-    ℹ️ Also licensed under Creative Commons BY-NC-SA 4.0 where compatible.
-    See LICENSE.md for full terms.
-#>
 function Get-UserOauthConsents {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory)][string]$UserId
+        [Parameter(Mandatory)][string]$UPN
     )
 
+    Write-Host "🔍 Retrieving directory audit logs for $UPN..." -ForegroundColor Cyan
+    Write-Log -Type "Information" -Message "🔍 Retrieving directory audit logs for $UPN..."
+
+    $lookBackDays = 30
+    $since = (Get-Date).AddDays(-$lookBackDays).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+
     try {
-        $grants = Get-MgUserOauth2PermissionGrant -UserId $UserId -ErrorAction Stop
-        Write-Host "🔑 Retrieved $($grants.Count) OAuth consents for user: $UserId" -ForegroundColor Gray
-        Write-Log -Type "Information" -Message "✅ Retrieved $($grants.Count) OAuth consents for user $UserId"
-        return $grants
+        $allLogs = Get-MgAuditLogDirectoryAudit -Filter "activityDateTime ge $since" -All
+        $AuditLogsOAUTH = $allLogs | Where-Object {
+            $_.InitiatedBy.User.UserPrincipalName -eq $UPN
+        }
+
+        Write-Log -Type "Information" -Message "📁 Retrieved $($AuditLogsOAUTH.Count) audit logs initiated by $UPN"
+        Write-Host "📁 Found $($AuditLogsOAUTH.Count) logs initiated by $UPN" -ForegroundColor Gray
     } catch {
-        Write-Host "❌ Failed to retrieve OAuth consents for $UserId" -ForegroundColor Red
-        Write-Log -Type "Error" -Message "❌ Failed to retrieve OAuth consents for user ${UserId}: $_"
+        Write-Log -Type "Error" -Message "❌ Failed to retrieve audit logs for ${UPN}: $_"
+        Write-Host "❌ Failed to retrieve audit logs" -ForegroundColor Red
         return @()
     }
+
+    Write-Host "🔍 Checking audit logs for explicit OAuth2 consents..." -ForegroundColor Cyan
+    Write-Log -Type "Information" -Message "🔍 Checking audit logs for explicit OAuth2 consent activity..."
+
+    $consents = @()
+
+    $consentEvents = $AuditLogsOAUTH | Where-Object {
+        $_.ActivityDisplayName -match '(?i)consent'
+    }
+
+    Write-Log -Type "Information" -Message "📑 Found $($consentEvents.Count) consent-related audit log entries"
+    Write-Host "📑 Found $($consentEvents.Count) relevant consent events" -ForegroundColor Gray
+
+    foreach ($event in $consentEvents) {
+        $appName = $event.TargetResources[0].DisplayName
+        $permissionsRaw = ($event.ModifiedProperties | Where-Object { $_.DisplayName -eq "ConsentAction.Permissions" }).NewValue
+        $permissionsClean = ($permissionsRaw -replace '[\[\]"{}]', '') -split ',' | ForEach-Object { $_.Trim() }
+        $permissionList = ($permissionsClean -join ', ')
+
+        # 🧠 Risk classification logic
+        $riskScore = 0
+        $factors = @()
+
+        if ($permissionsList -match "(?i)Mail.ReadWrite|Mail.Send|User.ReadWrite.All|Directory") {
+            $riskScore += 2
+            $factors += "SensitiveScopes"
+        }
+
+        if ($event.InitiatedBy.App) {
+            $riskScore += 2
+            $factors += "AdminConsent"
+        }
+
+        if ($event.TargetResources[0].ModifiedProperties -match "(?i)external") {
+            $riskScore += 1
+            $factors += "ExternalTenant"
+        }
+
+        switch ($true) {
+            { $riskScore -ge 4 } { $riskLevel = "High" }
+            { $riskScore -ge 2 } { $riskLevel = "Medium" }
+            default              { $riskLevel = "Low" }
+        }
+
+        Write-Log -Type "Information" -Message "🔐 Consent granted: $appName → $permissionList (Risk: $riskLevel)"
+        Write-Host "🔐 $appName → $permissionList (Risk: $riskLevel)" -ForegroundColor Yellow
+
+        $consents += [PSCustomObject]@{
+            Display     = $appName
+            Consent     = $event.ActivityDateTime
+            Permissions = $permissionList
+            RiskLevel   = $riskLevel
+            RiskFactors = ($factors -join ", ")
+        }
+    }
+
+    if ($consents.Count -eq 0) {
+        Write-Log -Type "OK" -Message "✅ No explicit OAuth2 consents found in audit logs."
+        Write-Host "✅ No OAuth consents found in audit logs" -ForegroundColor Green
+    }
+
+    return $consents
 }

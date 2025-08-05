@@ -319,34 +319,56 @@ function Build-IncidentReport {
   }
   </style>
   <script>
-    // ✅ Show the selected tab and activate its button
-    function showTab(tabId) {
-      document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
-      document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active'));
+  // ✅ Show the selected tab and activate its button
+  function showTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('active'));
 
-      document.getElementById(tabId).classList.add('active');
+    document.getElementById(tabId).classList.add('active');
 
-      document.querySelectorAll('nav button').forEach(btn => {
-        if (btn.getAttribute("onclick").includes(tabId)) {
-          btn.classList.add("active");
-        }
-      });
-    }
-
-    function openPopup(id) {
-      document.getElementById(id).style.display = 'block';
-    }
-
-    function closePopup(id) {
-      document.getElementById(id).style.display = 'none';
-    }
-
-    document.addEventListener('keydown', function(e) {
-      if (e.key === "Escape") {
-        document.querySelectorAll('.popup').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('nav button').forEach(btn => {
+      if (btn.getAttribute("onclick").includes(tabId)) {
+        btn.classList.add("active");
       }
     });
-  </script>
+  }
+
+  // ✅ Open a popup and ensure only one is open
+  function openPopup(id) {
+    closeAllPopups(); // Close any currently open popups
+    const popup = document.getElementById(id);
+    popup.style.display = 'block';
+
+    // Add temporary click listener to close popup when clicking outside
+    setTimeout(() => {
+      const handler = function (e) {
+        if (!popup.contains(e.target)) {
+          popup.style.display = 'none';
+          document.removeEventListener('click', handler); // Remove listener after execution
+        }
+      };
+      document.addEventListener('click', handler);
+    }, 0);
+  }
+
+  // ✅ Close a specific popup
+  function closePopup(id) {
+    document.getElementById(id).style.display = 'none';
+  }
+
+  // ✅ Close all open popups
+  function closeAllPopups() {
+    document.querySelectorAll('.popup').forEach(p => p.style.display = 'none');
+  }
+
+  // ✅ Close all popups when Escape key is pressed
+  document.addEventListener('keydown', function(e) {
+    if (e.key === "Escape") {
+      closeAllPopups();
+    }
+  });
+</script>
+
 </head>
   <body>
     <header>

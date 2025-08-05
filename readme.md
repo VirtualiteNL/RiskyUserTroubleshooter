@@ -65,7 +65,7 @@ Unblock-File .\riskyusertroubleshooter.ps1
 .\riskyusertroubleshooter.ps1
 ```
 
-Enter the UPN (email) of the user to investigate when prompted.
+Enter the UPN (or upn's) (email) of the user to investigate when prompted.
 
 ### Non-interactive
 

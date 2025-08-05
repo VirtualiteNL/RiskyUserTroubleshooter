@@ -33,18 +33,20 @@
     See LICENSE.md for full terms.
 #>
 # 🔹 Prompt the analyst for the UPN (User Principal Name) of the account under investigation
-$upn = Read-Host "Enter UPN of the user to investigate"
-if ([string]::IsNullOrWhiteSpace($upn)) {
-    Write-Host "❌ UPN is required. Exiting..." -ForegroundColor Red
-    Write-Log -Type "Alert" -Message "⚠️ Script aborted: no UPN entered by user."
+# 🔹 Prompt for one or more UPNs (comma-separated only)
+$userInput = Read-Host "Enter one or more UPNs to investigate (comma-separated)"
+if ([string]::IsNullOrWhiteSpace($userInput)) {
+    Write-Host "❌ At least one UPN is required. Exiting..." -ForegroundColor Red
     exit 1
 }
+
+# 🔹 Split input into individual UPNs
+$upnList = $userInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
 
 # 📁 Load logger module first so logging is available immediately
 . "$PSScriptRoot\modules\logger.ps1"
 
 # 📂 Create folders and define paths
-$sanitizedUpn = $upn -replace '[^a-zA-Z0-9@._-]', '_'
 $logFolder    = Join-Path $PSScriptRoot "logs"
 $reportFolder = Join-Path $PSScriptRoot "reports"
 $exportFolder = Join-Path $PSScriptRoot "exports"
@@ -54,8 +56,25 @@ if (-not (Test-Path $logFolder))    { New-Item -ItemType Directory -Path $logFol
 if (-not (Test-Path $reportFolder)) { New-Item -ItemType Directory -Path $reportFolder | Out-Null }
 if (-not (Test-Path $exportFolder)) { New-Item -ItemType Directory -Path $exportFolder | Out-Null }
 
-$logPath    = Join-Path $logFolder    "incidentreport-$sanitizedUpn.txt"
-$reportPath = Join-Path $reportFolder "incidentreport-$sanitizedUpn.html"
+    # 🔗 Connect to Microsoft 365
+    . "$PSScriptRoot\modules\connect.ps1"
+
+    Connect-GraphAndExchange
+    Write-Host "🔗 Connected to Microsoft 365" -ForegroundColor Green
+
+foreach ($upn in $upnList) {
+    # Sanitize the current UPN for use in file names
+    $sanitizedUpn = $upn -replace '[^a-zA-Z0-9@._-]', '_'
+
+    # Define log and report paths for this user
+    $logPath      = Join-Path $logFolder    "incidentreport-$sanitizedUpn.txt"
+    $reportPath   = Join-Path $reportFolder "incidentreport-$sanitizedUpn.html"
+
+    # Example usage
+    Write-Host "▶️ Processing $upn..."
+    Write-Host "   Log path:    $logPath"
+    Write-Host "   Report path: $reportPath"
+    
 
 # 📑 Start log
 Start-Log -Path $logPath
@@ -68,7 +87,6 @@ Ensure-RequiredModules
 
 # 📦 Load all custom modules
 . "$PSScriptRoot\modules\htmltools.ps1"
-. "$PSScriptRoot\modules\connect.ps1"
 . "$PSScriptRoot\modules\abuseipdb.ps1"
 . "$PSScriptRoot\modules\htmlbuilder.ps1"
 . "$PSScriptRoot\modules\userrisk.ps1"
@@ -93,11 +111,6 @@ Write-Log -Type "Information" -Message "📄 Log path: $logPath"
 Write-Log -Type "Information" -Message "📄 Report path: $reportPath"
 
 try {
-    # 🔗 Connect to Microsoft 365
-    Connect-GraphAndExchange
-    Write-Log -Type "OK" -Message "🔗 Connected to Microsoft Graph and Exchange Online."
-    Write-Host "🔗 Connected to Microsoft 365" -ForegroundColor Green
-
     # 📥 Collect data
     Write-Host "📦 Loading and executing UserRisk IOC modules..." -ForegroundColor DarkCyan
     $userRiskContent   = Get-UserRiskSection -LogPath $logPath -UPN $upn
@@ -136,7 +149,12 @@ try {
     Build-IncidentReport -Sections $Sections -OutputPath $reportPath -UserPrincipalName $upn
     Write-Host "🏁 Investigation finished. Report ready for review." -ForegroundColor Green
     Write-Log  -Type "OK" -Message "🏁 Investigation finished. Report ready for review."
-
+}
+catch {
+    Write-Log -Type "Error" -Message "❌ Fatal error: $($_.Exception.Message)"
+    Write-Host "❌ Script failed. Check log file for details." -ForegroundColor Red
+}
+}
     # 🔌 Disconnect services
     Disconnect-MgGraph | Out-Null
     Write-Log -Type "Information" -Message "🔌 Disconnected from Microsoft Graph."
@@ -148,8 +166,3 @@ try {
     Invoke-PostReportCleanup -JsonPath $exportedJsonPath
     Invoke-PostReportCleanup -JsonPath $exportFolder
     Write-Log -Type "Information" -Message "🧹 Temporary exports cleaned up."
-}
-catch {
-    Write-Log -Type "Error" -Message "❌ Fatal error: $($_.Exception.Message)"
-    Write-Host "❌ Script failed. Check log file for details." -ForegroundColor Red
-}
