@@ -1,0 +1,118 @@
+{
+  "firstRunComplete": true,
+  "apiKeys": {
+    "abuseipdb": {
+      "enabled": false,
+      "keyConfigured": false
+    }
+  },
+  "lookbackDays": 30,
+  "auditLogGroupingThreshold": 10,
+  "newAccountThresholdDays": 7,
+  "impossibleTravelSpeedKmh": 1000,
+  "abuseIpDbRiskThreshold": 70,
+  "workingHoursBufferHours": 2,
+  "workingHours": {
+    "start": 7,
+    "end": 18
+  },
+  "trustedDutchASNs": [
+    "ziggo",
+    "kpn",
+    "t-mobile",
+    "xs4all",
+    "vodafone",
+    "odido"
+  ],
+  "riskThresholds": {
+    "critical": 10,
+    "high": 7,
+    "medium": 4,
+    "low": 1
+  },
+  "iocDefinitions": {
+    "userRisk": {
+      "UR-01": { "name": "No MFA Registered", "points": 3, "description": "Critical security risk - no MFA methods registered" },
+      "UR-02": { "name": "Recent MFA Change", "points": 1, "description": "MFA methods modified recently - potentially suspicious" },
+      "UR-03": { "name": "Mailbox Delegates", "points": 1, "description": "Mailbox has shared/delegate access" },
+      "UR-04": { "name": "Forwarding Enabled", "points": 3, "description": "High exfiltration risk - email forwarding configured" },
+      "UR-05": { "name": "Suspicious Inbox Rules", "points": 2, "description": "Rules that forward, redirect, or delete messages" },
+      "UR-06": { "name": "OAuth Consents", "points": 2, "description": "Third-party application access granted" },
+      "UR-07": { "name": "Active Admin Role", "points": 2, "description": "User has elevated administrative privileges" },
+      "UR-08": { "name": "New Account", "points": 2, "description": "Account created within last 7 days" },
+      "UR-09": { "name": "Password Reset", "points": 1, "description": "Password reset within last 30 days" },
+      "UR-10": { "name": "CA Protection", "points": "0-3", "description": "Conditional Access protection status" }
+    },
+    "signInRisk": {
+      "SR-01": { "name": "Legacy Protocol", "points": 3, "description": "IMAP/POP/SMTP - no MFA possible" },
+      "SR-02": { "name": "MFA Failure", "points": 3, "description": "Sign-in failed at MFA stage after valid credentials" },
+      "SR-03": { "name": "No MFA Used", "points": 2, "description": "Unprotected login without MFA" },
+      "SR-04": { "name": "CA Policy Failure", "points": 2, "description": "Conditional Access policy violation" },
+      "SR-05": { "name": "Foreign IP", "points": "1-3", "description": "Foreign location based on AbuseIPDB score" },
+      "SR-06": { "name": "Suspicious IP+ASN", "points": 3, "description": "High abuse score + unknown ASN" },
+      "SR-07": { "name": "Impossible Travel", "points": 4, "description": "Geographically impossible travel detected" },
+      "SR-08": { "name": "Login Outside Hours", "points": 1, "description": "Sign-in outside inferred working hours" },
+      "SR-09": { "name": "Session Anomaly", "points": 4, "description": "IP/device/country mismatch in session" },
+      "SR-10": { "name": "Country Switch", "points": 2, "description": "Country changed during session" },
+      "SR-11": { "name": "Multiple IPs", "points": 1, "description": "Multiple IPs in same session (VPN/proxy possible)" },
+      "SR-12": { "name": "Device Change", "points": 1, "description": "Browser/OS switch during session" },
+      "SR-13": { "name": "Trusted Device", "points": -2, "description": "Azure AD joined device - safety indicator" },
+      "SR-14": { "name": "Compliant Device", "points": -3, "description": "Intune compliant device - safety indicator" },
+      "SR-15": { "name": "Location Netherlands", "points": -1, "description": "Sign-in from expected location" },
+      "SR-16": { "name": "Microsoft Risk Detection", "points": "2-4", "description": "Microsoft Identity Protection risk signals (requires Entra ID P2)", "requiresP2": true },
+      "SR-17": { "name": "Trusted Location IP", "points": -2, "description": "IP is in CA Named Location marked as trusted - safety indicator" },
+      "SR-18": { "name": "Frequently Used IP (MFA)", "points": -1, "description": "IP used 3+ times in last 30 days with successful MFA - safety indicator" },
+      "SR-19": { "name": "Frequently Used IP (Compliant)", "points": -2, "description": "IP used 3+ times in last 30 days with compliant device - safety indicator" }
+    }
+  },
+  "riskPoints": {
+    "noMfa": 3,
+    "recentMfaChange": 1,
+    "mailboxShared": 1,
+    "forwardingEnabled": 3,
+    "suspiciousInboxRules": 2,
+    "oauthConsents": 2,
+    "activeAdminRole": 2,
+    "newAccount": 2,
+    "passwordReset": 1
+  },
+  "logging": {
+    "level": "Information",
+    "enableDebug": false,
+    "enableStructuredJson": false
+  },
+  "api": {
+    "maxRetries": 3,
+    "retryDelayMs": 1000,
+    "timeoutSeconds": 30
+  },
+  "gracefulDegradation": {
+    "continueOnAbuseIpDbFailure": true,
+    "continueOnExchangeFailure": false
+  },
+  "breachProbability": {
+    "enabled": true,
+    "weights": {
+      "credentialCompromise": 40,
+      "sessionAnomalies": 35,
+      "configWeakness": 20,
+      "temporal": 5
+    },
+    "thresholds": {
+      "low": 20,
+      "medium": 40,
+      "high": 70,
+      "critical": 100
+    },
+    "multipliers": {
+      "credentialIndicator": 1.5,
+      "adminAccount": 1.3,
+      "multipleCategories": 1.2
+    },
+    "indicators": {
+      "credentialCompromise": ["MFA Failure", "Password reset <30 days", "Recent MFA change"],
+      "sessionAnomalies": ["Impossible travel", "Session anomaly", "Country switch", "Device change"],
+      "configWeakness": ["No MFA registered", "Forwarding enabled", "Suspicious inbox rules", "No CA protection"]
+    }
+  }
+}

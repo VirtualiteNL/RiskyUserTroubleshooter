@@ -70,6 +70,13 @@ function Get-UserCaProtectionStatus {
         }
         Write-Log -Type "Information" -Message "🔐 Found $($protectivePolicies.Count) protective CA policies"
 
+        # 🚫 Filter for block policies (alternative protection mechanism)
+        Write-Host "🚫 Filtering block policies..." -ForegroundColor Gray
+        $blockPolicies = $enabledPolicies | Where-Object {
+            $_.grantControls.builtInControls -contains "block"
+        }
+        Write-Log -Type "Information" -Message "🚫 Found $($blockPolicies.Count) block CA policies"
+
         # 🎓 Retrieve user roles if not already cached
         if (-not $global:userRoles) { $global:userRoles = @{} }
         if (-not $global:userRoles.ContainsKey($UPN)) {
@@ -88,6 +95,8 @@ function Get-UserCaProtectionStatus {
         $userProtected = $false
         $appliesToAllApps = $false
         $userGroups = @()
+        $protectedByBlock = $false
+        $blockPolicyName = ""
 
         foreach ($policy in $enabledPolicies) {
             $policyName = $policy.displayName
@@ -164,28 +173,76 @@ function Get-UserCaProtectionStatus {
             Write-Log -Type "Information" -Message "✅ $UPN is protected by policy: $policyName"
         }
 
+        # 🚫 Check block policies if user is not protected by MFA/device policies
+        if (-not $userProtected) {
+            foreach ($blockPolicy in $blockPolicies) {
+                $policyName = $blockPolicy.displayName
+                $users = $blockPolicy.conditions.users
+
+                if (-not $users) { continue }
+
+                $includeUsers  = @($users.includeUsers)
+                $excludeUsers  = @($users.excludeUsers)
+                $includeGroups = @($users.includeGroups)
+                $excludeGroups = @($users.excludeGroups)
+                $includeRoles  = @($users.includeRoles)
+                $excludeRoles  = @($users.excludeRoles)
+
+                # Retrieve user groups if needed and not already cached
+                if ($userGroups.Count -eq 0 -and ($includeGroups.Count -gt 0 -or $excludeGroups.Count -gt 0)) {
+                    $userGroups = (Get-MgUserMemberOf -UserId $UPN -All | Where-Object { $_.'@odata.type' -eq "#microsoft.graph.group" }).Id
+                }
+
+                $userRoleIds = $global:userRoles[$UPN]
+
+                $includedUPN     = ($includeUsers -contains $UserObject.Id -or $includeUsers -contains "All")
+                $includedGroup   = ($includeGroups | Where-Object { $userGroups -contains $_ }).Count -gt 0
+                $includedRole    = ($includeRoles | Where-Object { $userRoleIds -contains $_ }).Count -gt 0
+                $excludedUPN     = ($excludeUsers -contains $UserObject.Id)
+                $excludedGroup   = ($excludeGroups | Where-Object { $userGroups -contains $_ }).Count -gt 0
+                $excludedRole    = ($excludeRoles | Where-Object { $userRoleIds -contains $_ }).Count -gt 0
+
+                # Skip if user is not included in block policy
+                if (-not ($includedUPN -or $includedGroup -or $includedRole)) { continue }
+
+                # Skip if user is excluded from block policy
+                if ($excludedUPN -or $excludedGroup -or $excludedRole) { continue }
+
+                # User is protected by this block policy
+                $protectedByBlock = $true
+                $blockPolicyName = $policyName
+                Write-Log -Type "Information" -Message "🚫 $UPN is protected by block policy: $policyName"
+                break
+            }
+        }
+
         # 🧠 Add final human-readable outcome
         if (-not $global:aiadvisory.UserRisk) { $global:aiadvisory.UserRisk = @{} }
 
         if ($userProtected) {
             if (-not $appliesToAllApps -or $appsExcluded) {
-                $global:aiadvisory.UserRisk.CAProtection = "⚠️ Protected by Conditional Access, but not for all apps"
-                Write-Log -Type "Alert" -Message "⚠️ $UPN protected by CA, but not all apps covered or some apps excluded"
+                $global:aiadvisory.UserRisk.CAProtection = "Partial - not all apps covered"
+                Write-Log -Type "Alert" -Message "$UPN protected by CA, but not all apps covered or some apps excluded"
                 return @{ Name = "CA protection"; Condition = $true; Points = 2; MaxPoints = 3 }
             } else {
-                $global:aiadvisory.UserRisk.CAProtection = "✅ Fully protected by Conditional Access"
-                Write-Log -Type "OK" -Message "✅ $UPN protected by CA for all apps"
+                $global:aiadvisory.UserRisk.CAProtection = "Full - protected by Conditional Access"
+                Write-Log -Type "OK" -Message "$UPN protected by CA for all apps"
                 return @{ Name = "CA protection"; Condition = $false; Points = 0; MaxPoints = 3 }
             }
+        } elseif ($protectedByBlock) {
+            # User has no MFA/device policy but is protected by a block policy
+            $global:aiadvisory.UserRisk.CAProtection = "Block policy only: $blockPolicyName"
+            Write-Log -Type "Alert" -Message "$UPN not protected by MFA CA policy, but has block policy: $blockPolicyName"
+            return @{ Name = "CA protection (Block policy: $blockPolicyName)"; Condition = $true; Points = 1; MaxPoints = 3 }
         } else {
-            $global:aiadvisory.UserRisk.CAProtection = "🚫 Not protected by any Conditional Access policy"
-            Write-Log -Type "Alert" -Message "🚫 $UPN not protected by any MFA/device CA policy"
+            $global:aiadvisory.UserRisk.CAProtection = "None - not protected by CA"
+            Write-Log -Type "Alert" -Message "$UPN not protected by any MFA/device CA policy"
             return @{ Name = "CA protection"; Condition = $true; Points = 3; MaxPoints = 3 }
         }
     }
     catch {
-        $global:aiadvisory.UserRisk.CAProtection = "❌ Error during CA evaluation"
-        Write-Log -Type "Error" -Message "❌ CA check failed for ${UPN}: $($_.Exception.Message)"
+        $global:aiadvisory.UserRisk.CAProtection = "Error during CA evaluation"
+        Write-Log -Type "Error" -Message "CA check failed for ${UPN}: $($_.Exception.Message)"
         return @{ Name = "CA protection"; Condition = $true; Points = 1 }
     }
 }

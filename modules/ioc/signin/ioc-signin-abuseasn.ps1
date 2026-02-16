@@ -33,6 +33,13 @@
     See LICENSE.md for full terms.
 #>
 function Test-SignInAbuseAsnRisk {
+    <#
+    .SYNOPSIS
+        Evaluates Sign-In IOCs for foreign IP and suspicious ASN (SR-05, SR-06)
+    .DESCRIPTION
+        Checks sign-in events against AbuseIPDB scores and ASN reputation.
+        Points are synchronized with config/settings.json iocDefinitions.signInRisk
+    #>
     param (
         [Parameter(Mandatory = $true)]
         [object]$SignIn,
@@ -46,7 +53,8 @@ function Test-SignInAbuseAsnRisk {
     $asnScore = 0
 
     # 🛰️ Extract and normalize AbuseIPDB score
-    if ($null -eq $SignIn.AbuseScore -or -not ($SignIn.AbuseScore -match '\d+')) {
+    $abuseNotAvailable = ($null -eq $SignIn.AbuseScore -or $SignIn.AbuseScore -eq "N/A" -or -not ($SignIn.AbuseScore -match '\d+'))
+    if ($abuseNotAvailable) {
         [int]$abuseVal = 0
         Write-Log -Type "Information" -Message "ℹ️ No AbuseIPDB score available for IP $($SignIn.IpAddress) – Risk +0"
     } else {
@@ -58,14 +66,15 @@ function Test-SignInAbuseAsnRisk {
     $isForeign = $SignIn.Location.CountryOrRegion -and
                  $SignIn.Location.CountryOrRegion -notin @("NL", "Netherlands")
 
+    # 🌐 SR-05: Foreign IP - score based on AbuseIPDB reputation
+    # Points: 1-3 depending on abuse score (per settings.json)
     if ($isForeign) {
-        # ⚖️ Assign score based on AbuseIPDB reputation
-        if ($abuseVal -lt 10)       { $countryScore = 0.5 }
+        if ($abuseVal -lt 10)       { $countryScore = 1 }
         elseif ($abuseVal -lt 26)   { $countryScore = 1 }
         elseif ($abuseVal -lt 50)   { $countryScore = 2 }
         else                        { $countryScore = 3 }
 
-        Write-Log -Type "Alert" -Message "IOC 2: Foreign IP ($($SignIn.Location.CountryOrRegion)) with AbuseScore $abuseVal – Risk +$countryScore"
+        Write-Log -Type "Alert" -Message "SR-05: Foreign IP ($($SignIn.Location.CountryOrRegion)) with AbuseScore $abuseVal – Risk +$countryScore"
     }
 
     # 🛰️ Check if ASN is in trusted Dutch ISP whitelist
@@ -74,16 +83,18 @@ function Test-SignInAbuseAsnRisk {
 
     $asnIsUntrusted = $asn -and ($trustedASNs -notcontains ($asn.ToLower()))
 
-    # 🚨 Check for high AbuseIPDB score combined with unknown ASN
+    # 🚨 SR-06: Suspicious IP+ASN - high abuse score combined with unknown ASN
+    # Points: 3 (per settings.json)
     if ($abuseVal -ge 70 -and $asnIsUntrusted) {
-        $asnScore = 2
-        Write-Log -Type "Alert" -Message "IOC 9: Suspicious IP $($SignIn.IpAddress) – AbuseScore $abuseVal + Unknown ASN '$asn' – Risk +2"
+        $asnScore = 3
+        Write-Log -Type "Alert" -Message "SR-06: Suspicious IP $($SignIn.IpAddress) – AbuseScore $abuseVal + Unknown ASN '$asn' – Risk +3"
     }
 
     # 🧾 Return both breakdown entries (even if 0)
+    $abuseDisplay = if ($abuseNotAvailable) { "N/A" } else { $abuseVal }
     return @(
         @{
-            Name   = "Foreign IP + AbuseIPDB score ($abuseVal)"
+            Name   = "Foreign IP + AbuseIPDB score ($abuseDisplay)"
             Points = $countryScore
         },
         @{

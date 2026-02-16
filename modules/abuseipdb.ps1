@@ -78,7 +78,8 @@ function Get-AbuseIpScore {
     } else {
         Write-Host "⚠️ AbuseIPDB API key file not found – skipping IP check for $IpAddress" -ForegroundColor Yellow
         Write-Log -Type "Error" -Message "🚫 No AbuseIPDB API key file found – skipping check for $IpAddress"
-        return 0
+        $Global:AbuseIpCache[$IpAddress] = "N/A"
+        return "N/A"
     }
 
     # 🌐 Send API request
@@ -98,9 +99,9 @@ function Get-AbuseIpScore {
         return $score
     }
     catch {
-        Write-Host "❌ Error retrieving AbuseIPDB score for $IpAddress – fallback score 0 used." -ForegroundColor Red
+        Write-Host "❌ Error retrieving AbuseIPDB score for $IpAddress – using N/A." -ForegroundColor Red
         Write-Log -Type "Error" -Message "❌ Failed to retrieve AbuseIPDB score for ${IpAddress}: $($_.Exception.Message)"
-        $Global:AbuseIpCache[$IpAddress] = 0
-        return 0
+        $Global:AbuseIpCache[$IpAddress] = "N/A"
+        return "N/A"
     }
 }

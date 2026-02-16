@@ -76,19 +76,59 @@ function Get-UserRiskSection {
     Write-Host "📑 Retrieved $($DirectoryAuditLogs.Count) audit log events." -ForegroundColor Gray
     Write-Log -Type "Information" -Message "📑 Retrieved $($DirectoryAuditLogs.Count) audit events for $UPN"
 
-    $global:UserDirectoryAuditLogs = $DirectoryAuditLogs
+    # 🧹 Optimization: Group repetitive audit entries to improve performance
+    # Threshold configurable via settings.json (default: 10)
+    $groupingThreshold = 10
+    if ($global:settings -and $global:settings.auditLogGroupingThreshold) {
+        $groupingThreshold = $global:settings.auditLogGroupingThreshold
+    }
 
-    # 🧠 Structure audit logs for OpenAI export
-    $global:aiadvisory.AuditLogs = $DirectoryAuditLogs | ForEach-Object {
+    # Group audit logs by ActivityDisplayName
+    $activityGroups = $DirectoryAuditLogs | Group-Object ActivityDisplayName
+
+    # Separate frequent vs rare activities
+    $processedLogs = @()
+    $groupedCount = 0
+
+    foreach ($group in $activityGroups) {
+        if ($group.Count -ge $groupingThreshold) {
+            # For frequent activities, keep first occurrence with count metadata
+            $firstEntry = $group.Group | Select-Object -First 1
+            $firstEntry | Add-Member -NotePropertyName "OccurrenceCount" -NotePropertyValue $group.Count -Force
+            $firstEntry | Add-Member -NotePropertyName "IsGrouped" -NotePropertyValue $true -Force
+            $processedLogs += $firstEntry
+            $groupedCount++
+            Write-Log -Type "Information" -Message "📊 Grouped $($group.Count)x '$($group.Name)' audit entries"
+        } else {
+            # Keep all rare activities
+            foreach ($entry in $group.Group) {
+                $entry | Add-Member -NotePropertyName "OccurrenceCount" -NotePropertyValue 1 -Force
+                $entry | Add-Member -NotePropertyName "IsGrouped" -NotePropertyValue $false -Force
+                $processedLogs += $entry
+            }
+        }
+    }
+
+    if ($groupedCount -gt 0) {
+        Write-Host "📊 Optimized: Grouped $groupedCount activity types with $groupingThreshold+ occurrences" -ForegroundColor DarkYellow
+        Write-Log -Type "Information" -Message "📊 Audit log optimization: $groupedCount activity types grouped (threshold: $groupingThreshold)"
+    }
+
+    $global:UserDirectoryAuditLogs = $processedLogs
+
+    # 🧠 Structure audit logs for OpenAI export (uses processed/grouped logs)
+    $global:aiadvisory.AuditLogs = $processedLogs | ForEach-Object {
         [PSCustomObject]@{
             Time           = $_.activityDateTime
-            Action         = $_.activityDisplayName
+            Action         = if ($_.IsGrouped) { "$($_.activityDisplayName) ($($_.OccurrenceCount)x)" } else { $_.activityDisplayName }
             InitiatedBy    = $_.initiatedBy.user.userPrincipalName
             Target         = $_.targetResources[0].userPrincipalName
             TargetDisplay  = $_.targetResources[0].displayName
             Properties     = ($_.modifiedProperties | ForEach-Object {
                                 "$($_.displayName): $($_.newValue)"
                             }) -join ', '
+            OccurrenceCount = $_.OccurrenceCount
+            IsGrouped      = $_.IsGrouped
         }
     }
 
@@ -105,6 +145,19 @@ function Get-UserRiskSection {
         . "$PSScriptRoot\..\modules\ioc\userrisk\ioc-userrisk-forwarding.ps1"
         # 📤 Retrieve mailbox forwarding configuration
         $forwarding = Get-MailboxForwardingInfo -UPN $user.UserPrincipalName
+
+        # 📥 Retrieve mailbox delegates (shared access permissions)
+        $delegates = @()
+        try {
+            $mbxPermissions = Get-MailboxPermission -Identity $user.UserPrincipalName -ErrorAction SilentlyContinue |
+                Where-Object { $_.User -notlike "NT AUTHORITY\*" -and $_.User -notlike "S-1-*" -and $_.IsInherited -eq $false }
+            if ($mbxPermissions) {
+                $delegates = $mbxPermissions
+            }
+            Write-Log -Type "Information" -Message "Retrieved $($delegates.Count) mailbox delegates for $($user.UserPrincipalName)"
+        } catch {
+            Write-Log -Type "Alert" -Message "Could not retrieve mailbox delegates: $($_.Exception.Message)"
+        }
 
         # 📥 Import the module that retrieves inbox rules
         . "$PSScriptRoot\..\modules\ioc\userrisk\ioc-userrisk-inboxrules.ps1"
@@ -157,17 +210,25 @@ function Get-UserRiskSection {
         $caResult = Get-UserCaProtectionStatus -UPN $user.UserPrincipalName -UserObject $user
         Write-Log -Type "Information" -Message "🛡️ Conditional Access protection status evaluated"
 
-        # 🧠 Define all risk indicators
+        # 📤 Separate forwarding rules from other suspicious rules
+        $forwardingRules = @($rules | Where-Object { $_.ForwardTo })
+        $otherSuspiciousRules = @($rules | Where-Object { $_.RedirectTo -or $_.DeleteMessage })
+
+        # UR-04: Check both mailbox-level forwarding AND inbox rules with ForwardTo
+        $hasForwarding = ($forwarding.ForwardingSmtpAddress) -or ($forwardingRules.Count -gt 0)
+
+        # Define all risk indicators (IOC IDs: UR-01 through UR-10)
+        # Points are synchronized with config/settings.json iocDefinitions.userRisk
         $riskIndicators = @(
-            @{ Name = "No MFA registered";         Condition = ($activeMfa.Count -eq 0); Points = 2 },
-            @{ Name = "Recent MFA change";         Condition = ($recentMfaChanges.Count -gt 0); Points = 1 },
-            @{ Name = "Mailbox shared with others";Condition = ($delegates.Count -gt 0); Points = 1 },
-            @{ Name = "Forwarding enabled";        Condition = ($forwarding.ForwardingSmtpAddress); Points = 2 },
-            @{ Name = "Suspicious inbox rules";    Condition = ($rules | Where-Object { $_.ForwardTo -or $_.RedirectTo -or $_.DeleteMessage }).Count -gt 0; Points = 1 },
-            @{ Name = "OAuth consents"; Condition = ($oauthApps.Count -gt 0); Points = 2 }
-            @{ Name = "Active admin role";         Condition = ($directoryRoles.Count -gt 0); Points = 1 },
-            @{ Name = "Account < 7 days old";      Condition = $isNewAccount; Points = 2 },
-            @{ Name = "Password reset <30 days";   Condition = ($pwdEvents.Count -gt 0); Points = 1 }
+            @{ Name = "No MFA registered";            Condition = ($activeMfa.Count -eq 0); Points = 3 },          # UR-01: Critical security risk - no MFA methods registered
+            @{ Name = "Recent MFA change";            Condition = ($recentMfaChanges.Count -gt 0); Points = 1 },   # UR-02: MFA methods modified recently - potentially suspicious
+            @{ Name = "Mailbox shared with others";   Condition = ($delegates.Count -gt 0); Points = 1 },          # UR-03: Mailbox has shared/delegate access
+            @{ Name = "Forwarding enabled";           Condition = $hasForwarding; Points = 3 },                    # UR-04: High exfiltration risk - mailbox forwarding OR inbox rule with ForwardTo
+            @{ Name = "Suspicious inbox rules";       Condition = ($otherSuspiciousRules.Count -gt 0); Points = 2 }, # UR-05: Rules that redirect or delete messages (ForwardTo excluded - covered by UR-04)
+            @{ Name = "OAuth consents";               Condition = ($oauthApps.Count -gt 0); Points = 2 },          # UR-06: Third-party application access granted
+            @{ Name = "Active admin role";            Condition = ($directoryRoles.Count -gt 0); Points = 2 },     # UR-07: User has elevated administrative privileges
+            @{ Name = "Account < 7 days old";         Condition = $isNewAccount; Points = 2 },                     # UR-08: Account created within last 7 days
+            @{ Name = "Password reset < 30 days";     Condition = ($pwdEvents.Count -gt 0); Points = 1 }           # UR-09: Password reset within last 30 days
         )
         if ($caResult -ne $null) {
             $riskIndicators += $caResult
@@ -176,75 +237,98 @@ function Get-UserRiskSection {
         # 🧹 Remove null entries
         $riskIndicators = $riskIndicators | Where-Object { $_ -ne $null }
 
-        # 📦 Prepare OpenAI export structure
-        $aiuserriskreport = @{ Risks = @() }
+        # ⚖️ Evaluate each indicator and build risk details
+        $userRiskData = @{ Risks = @() }
 
-        # ⚖️ Evaluate each indicator
         foreach ($check in $riskIndicators) {
             $hit = [bool]$check.Condition
             if ($hit) { $RiskScore += $check.Points }
 
             $riskDetails += [PSCustomObject]@{
-                Criterium = $check.Name
-                Status    = if ($hit) { "⚠️" } else { "✅" }
-                Punten    = if ($hit) { $check.Points } else { 0 }
+                Criterion = $check.Name
+                Status    = if ($hit) { "●" } else { "—" }
+                Points    = if ($hit) { $check.Points } else { 0 }
                 MaxPoints = $check.Points
             }
 
-            $aiuserriskreport.Risks += @{
+            $userRiskData.Risks += @{
                 Type    = $check.Name
                 Details = if ($hit) { "Applicable" } else { "Not applicable" }
+                Points  = if ($hit) { $check.Points } else { 0 }
+                MaxPoints = $check.Points
             }
         }
 
-        # 🧭 Determine export location
-        $modulePath   = $PSScriptRoot
-        $rootFolder   = Split-Path -Path (Split-Path -Path $modulePath -Parent) -Parent
-        $exportFolder = Join-Path -Path $rootFolder -ChildPath "exports"
-        if (-not (Test-Path $exportFolder)) {
-            New-Item -Path $exportFolder -ItemType Directory -Force | Out-Null
+        # 📊 Store user risk data in global object for summary page
+        # Preserve CAProtection and Consents that were set earlier
+        $userRiskData.RiskScore = $RiskScore
+        $userRiskData.MaxScore = ($riskIndicators | Where-Object { $_.Points -gt 0 } | Measure-Object -Property Points -Sum).Sum
+        if ($userRiskData.MaxScore -eq 0) { $userRiskData.MaxScore = 20 }
+        if ($global:aiadvisory.UserRisk.CAProtection) {
+            $userRiskData.CAProtection = $global:aiadvisory.UserRisk.CAProtection
         }
+        if ($global:aiadvisory.UserRisk.Consents) {
+            $userRiskData.Consents = $global:aiadvisory.UserRisk.Consents
+        }
+        $global:aiadvisory.UserRisk = $userRiskData
+        Write-Log -Type "Information" -Message "📊 Stored $(@($userRiskData.Risks | Where-Object { $_.Details -eq 'Applicable' }).Count) user risk indicators with score $RiskScore"
 
-        # 💾 Export OpenAI JSON
-        $exportPath = Join-Path -Path $exportFolder -ChildPath "aiuserriskreport.json"
-        $global:aiadvisory.UserRisk += $aiuserriskreport
-        $aiuserriskreport | ConvertTo-Json -Depth 10 | Out-File -FilePath $exportPath -Encoding UTF8
-        Write-Log -Type "OK" -Message "✅ AI user risk report saved to: $exportPath"
-
-        # 🧮 Classify total score
+        # 🧮 Classify total score (updated thresholds)
         switch ($true) {
-            { $RiskScore -ge 9 } { $RiskLevel = "Critical"; $RiskClass = "status-bad"; break }
-            { $RiskScore -ge 6 } { $RiskLevel = "High";     $RiskClass = "status-bad"; break }
-            { $RiskScore -ge 3 } { $RiskLevel = "Medium";   $RiskClass = "status-warning"; break }
-            default              { $RiskLevel = "Low";      $RiskClass = "status-good"; break }
+            { $RiskScore -ge 10 } { $RiskLevel = "Critical"; $RiskClass = "status-critical"; break }
+            { $RiskScore -ge 7 }  { $RiskLevel = "High";     $RiskClass = "status-bad"; break }
+            { $RiskScore -ge 4 }  { $RiskLevel = "Medium";   $RiskClass = "status-warning"; break }
+            default               { $RiskLevel = "Low";      $RiskClass = "status-good"; break }
         }
 
         # 🪟 Generate popup HTML per indicator
-        foreach ($r in $riskDetails | Where-Object { $_.Punten -ge 1 }) {
+        $popupIdMap = @{}  # Store Criterion -> PopupId mapping
+        foreach ($r in $riskDetails) {
+            if ($r.Points -lt 1) { continue }
+
             $popupId = "popup-" + ([guid]::NewGuid().ToString())
+            $popupIdMap[$r.Criterion] = $popupId
             $popupContent = ""
 
-            switch ($r.Criterium) {
-                "Recent MFA change" {
+            # Match criterion names (use -like for flexible matching)
+            switch -Wildcard ($r.Criterion) {
+                "*Recent MFA change*" {
                     $popupContent = Convert-ToHtmlTable ($recentMfaChanges | Select ActivityDateTime, ActivityDisplayName, InitiatedBy)
                 }
-                "Mailbox shared with others" {
+                "*Mailbox shared*" {
                     $popupContent = Convert-ToHtmlTable ($delegates | Select User, AccessRights)
                 }
-                "Forwarding enabled" {
-                    $popupContent = Convert-ToHtmlTable @($forwarding)
+                "*Forwarding enabled*" {
+                    # Show both mailbox-level forwarding AND inbox rules with ForwardTo
+                    $forwardingContent = @()
+
+                    # Mailbox-level forwarding
+                    if ($forwarding.ForwardingSmtpAddress) {
+                        $forwardingContent += [PSCustomObject]@{
+                            "Source" = "Mailbox Setting"
+                            "Forward To" = $forwarding.ForwardingSmtpAddress
+                            "Keep Copy" = if ($forwarding.DeliverToMailboxAndForward) { "Yes" } else { "No" }
+                        }
+                    }
+
+                    # Inbox rules with ForwardTo
+                    foreach ($rule in $forwardingRules) {
+                        $forwardTo = ($rule.ForwardTo | ForEach-Object { $_.PrimarySmtpAddress ?? $_.Name ?? $_.ToString().Split('[')[0].Trim() }) -join ', '
+                        $forwardingContent += [PSCustomObject]@{
+                            "Source" = "Inbox Rule: $($rule.Name)"
+                            "Forward To" = $forwardTo
+                            "Keep Copy" = "Yes (rule-based)"
+                        }
+                    }
+
+                    $popupContent = Convert-ToHtmlTable $forwardingContent
                 }
-                "Suspicious inbox rules" {
+                "*Suspicious inbox rules*" {
+                    # Only show RedirectTo and DeleteMessage rules (ForwardTo is covered by UR-04)
                     $popupContent = Convert-ToHtmlTable (
-                        $rules | Where-Object {
-                            $_.ForwardTo -or $_.RedirectTo -or $_.DeleteMessage
-                        } | ForEach-Object {
+                        $otherSuspiciousRules | ForEach-Object {
                             $action = @()
                             $info   = @()
-                            if ($_.ForwardTo) {
-                                $action += "Forward"
-                                $info += "To: " + ($_.ForwardTo | ForEach-Object { $_.PrimarySmtpAddress ?? $_.Name ?? $_.ToString().Split('[')[0].Trim() }) -join ', '
-                            }
                             if ($_.RedirectTo) {
                                 $action += "Redirect"
                                 $info += "To: " + ($_.RedirectTo | ForEach-Object { $_.PrimarySmtpAddress ?? $_.Name ?? $_.ToString().Split('[')[0].Trim() }) -join ', '
@@ -261,29 +345,37 @@ function Get-UserRiskSection {
                         }
                     )
                 }
-                "OAuth consents" {
+                "*OAuth consents*" {
                     $popupContent = Convert-ToHtmlTable (
                         $global:aiadvisory.UserRisk.Consents | Select Display, Consent, RiskLevel
                     )
                 }
-
-                "Active admin role" {
+                "*Active admin role*" {
                     $popupContent = Convert-ToHtmlTable ($directoryRoles | Select RoleName)
                 }
-                "No MFA registered" {
-                    $popupContent = Convert-ToHtmlTable $activeMfa
+                "*No MFA registered*" {
+                    if ($null -eq $activeMfa -or $activeMfa.Count -eq 0) {
+                        $popupContent = "<p><strong>Warning:</strong> No MFA methods are registered for this user account. This is a critical security risk.</p>"
+                    } else {
+                        $popupContent = Convert-ToHtmlTable $activeMfa
+                    }
                 }
-                "Account < 7 days old" {
+                "*Account*7 days*" {
                     $popupContent = "<p>This account was created on <strong>$($user.CreatedDateTime)</strong>, which is less than 7 days ago.</p>"
                 }
-                "Password reset <30 days" {
+                "*Password reset*" {
                     $popupContent = Convert-ToHtmlTable ($pwdEvents | Select activityDateTime, initiatedBy)
                 }
-                "CA protection" {
+                "*CA protection*" {
                     $popupContent = switch -Wildcard ($global:aiadvisory.UserRisk.CAProtection) {
-                        "✅*" { "<p>User is <strong>fully protected</strong> by Conditional Access (MFA/device required).</p>" }
-                        "⚠️*" { "<p>User is protected, but <strong>not all cloud apps are covered</strong>.</p>" }
-                        "🚫*" { "<p>User is <strong>not protected</strong> by any Conditional Access policy requiring MFA/device.</p>" }
+                        "Full*" { "<p>User is <strong>fully protected</strong> by Conditional Access (MFA/device required).</p>" }
+                        "Partial*" { "<p>User is protected, but <strong>not all cloud apps are covered</strong>.</p>" }
+                        "Block policy*" {
+                            $blockPolicyMatch = [regex]::Match($global:aiadvisory.UserRisk.CAProtection, "Block policy only: (.+)")
+                            $policyName = if ($blockPolicyMatch.Success) { $blockPolicyMatch.Groups[1].Value } else { "Unknown" }
+                            "<p>User is <strong>not protected</strong> by MFA/device Conditional Access policies.</p><p style='color: #f0ad4e;'>However, user is covered by a <strong>block policy</strong>: <code>$policyName</code></p><p><em>Block policies provide alternative protection by restricting access based on conditions (e.g., location, device state).</em></p>"
+                        }
+                        "None*" { "<p>User is <strong>not protected</strong> by any Conditional Access policy requiring MFA/device.</p>" }
                         default { "<p>No Conditional Access coverage information available.</p>" }
                     }
                 }
@@ -292,16 +384,14 @@ function Get-UserRiskSection {
                 }
             }
 
-            $r | Add-Member -NotePropertyName PopupId -NotePropertyValue $popupId -Force
-
-        # 📄 Render popup HTML block
+        # Render popup HTML block with ARIA accessibility
         $htmlPopups += @"
-<div id='$popupId' class='popup'>
+<div id='$popupId' class='popup' role='dialog' aria-modal='true' aria-labelledby='$popupId-title' aria-hidden='true'>
   <div class='popup-header'>
-    <h3>$($r.Criterium)</h3>
-    <span class='popup-close' onclick='closePopup(`"$popupId`")'>&times;</span>
+    <h3 id='$popupId-title'>$($r.Criterion)</h3>
+    <button class='popup-close' onclick='closePopup("$popupId")' aria-label='Close dialog'>&times;</button>
   </div>
-  <div class='popup-body'>
+  <div class='popup-body' style='overflow-y: auto !important; max-height: calc(80vh - 70px); height: auto;'>
     $popupContent
   </div>
 </div>
@@ -311,44 +401,40 @@ function Get-UserRiskSection {
     # 📊 Construct risk score HTML table and embed popup logic
     $html = @"
 <div class='advisory-section'>
-  <table class='advisory-table'>
+  <table class='advisory-table' id='userrisk-table'>
     <thead>
       <tr>
-        <th>Criteria</th>
+        <th>Risk Indicator</th>
         <th>Status</th>
         <th>Points</th>
+        <th class='fp-column'>Action</th>
       </tr>
     </thead>
     <tbody>
 "@
 
-    foreach ($r in $riskDetails |
-                Sort-Object -Property @{ Expression = { $_.Punten }; Descending = $true },
-                                          @{ Expression = { $_.Criterium }; Descending = $false }) {
+    # Sort riskDetails and use hashtable to look up PopupIds
+    $sortedRiskDetails = $riskDetails | Sort-Object -Property @{ Expression = { $_.Points }; Descending = $true }, @{ Expression = { $_.Criterion }; Descending = $false }
 
-        $onclick = ""
-        if ($r.PSObject.Properties.Name -contains "PopupId") {
-            $onclick = " onclick=`"openPopup('$($r.PopupId)')`" style='cursor:pointer;'"
+    # Generate indicator IDs for each risk
+    $indicatorIdCounter = 1
+    foreach ($r in $sortedRiskDetails) {
+        $indicatorId = "ur-" + $indicatorIdCounter.ToString("00")
+        $indicatorIdCounter++
+        $statusColor = if ($r.Points -gt 0) { "#f0ad4e" } else { "#6c757d" }
+        $popupAttr = if ($popupIdMap.ContainsKey($r.Criterion)) { " data-popup-id='$($popupIdMap[$r.Criterion])'" } else { "" }
+
+        # Show FP button for all indicators with Points > 0 (can be intentionally configured)
+        $fpButton = if ($r.Points -gt 0) {
+            "<button class='fp-toggle' onclick=`"event.stopPropagation(); toggleFalsePositive('userRisk', '$indicatorId')`">Mark FP</button>"
+        } else {
+            ""
         }
 
-        $html += "      <tr$onclick><td>$($r.Criterium)</td><td>$($r.Status)</td><td>$($r.Punten)/$($r.MaxPoints)</td></tr>`n"
+        $html += "      <tr$popupAttr data-indicator-id='$indicatorId'><td>$($r.Criterion)</td><td style='color: $statusColor;'>$($r.Status)</td><td>$($r.Points)/$($r.MaxPoints)</td><td class='fp-cell'>$fpButton</td></tr>`n"
     }
 
     $html += @"
-    </tbody>
-  </table>
-  <table class='advisory-table' style='margin-top: 20px; width: auto;'>
-    <thead>
-      <tr>
-        <th>Total Score</th>
-        <th>Risk Level</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><span class='$RiskClass'>$RiskScore / $(Get-MaxRiskScore -Indicators $riskIndicators)</span></td>
-        <td><span class='$RiskClass'>$RiskLevel</span></td>
-      </tr>
     </tbody>
   </table>
 </div>

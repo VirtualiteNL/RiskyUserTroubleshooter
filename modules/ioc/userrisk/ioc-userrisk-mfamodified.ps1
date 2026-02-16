@@ -45,8 +45,14 @@ function Get-RecentMfaChanges {
         $adminChanges = Get-MgAuditLogDirectoryAudit -Filter "targetResources/any(t:t/userPrincipalName eq '$UPN')" -All
 
         # 🕓 Filter for recent MFA method changes within the last 7 days
+        # Match various MFA-related activity names:
+        # - "Authentication Method" (e.g., "User has registered all required authentication methods")
+        # - "security info" (e.g., "User registered security info", "Admin deleted security info")
+        # - "Authenticator" (e.g., "User registered Authenticator App")
+        # - "StrongAuthentication" (e.g., updates via Azure MFA StrongAuthenticationService)
         $recentMfaChanges = $adminChanges | Where-Object {
-            $_.ActivityDisplayName -match "Authentication Method" -and
+            ($_.ActivityDisplayName -match "Authentication Method|security info|Authenticator|StrongAuthentication" -or
+             $_.Category -eq "Authentication Methods") -and
             $_.ActivityDateTime -gt (Get-Date).AddDays(-7)
         }
 

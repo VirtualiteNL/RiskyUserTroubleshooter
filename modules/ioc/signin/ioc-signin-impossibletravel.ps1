@@ -110,11 +110,15 @@ function Test-ImpossibleTravel {
             $curr | Add-Member -NotePropertyName TravelDetails -NotePropertyValue @{
                 From        = "$($loc1.City), $($loc1.Country)"
                 To          = "$($loc2.City), $($loc2.Country)"
+                FromIP      = $prev.IpAddress
+                ToIP        = $curr.IpAddress
                 DistanceKm  = [math]::Round($distKm,2)
                 TimeHours   = [math]::Round($hours,2)
                 SpeedKmh    = [math]::Round($speed,2)
                 Detected    = $true
             } -Force
+            # 📌 Store reference to the previous sign-in for context display
+            $curr | Add-Member -NotePropertyName PreviousSignIn -NotePropertyValue $prev -Force
         }
     }
     return $SignIns

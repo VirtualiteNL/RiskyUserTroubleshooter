@@ -34,6 +34,13 @@
 #>
 
 function Test-SignInBaselineIOCs {
+    <#
+    .SYNOPSIS
+        Evaluates baseline Sign-In IOCs (SR-01, SR-07, SR-08, SR-13, SR-14, SR-15)
+    .DESCRIPTION
+        Checks sign-in events against baseline indicators of compromise.
+        Points are synchronized with config/settings.json iocDefinitions.signInRisk
+    #>
     param (
         [Parameter(Mandatory)]
         $SignIn,
@@ -45,8 +52,9 @@ function Test-SignInBaselineIOCs {
     $results = @()
 
     try {
-        # 📡 IOC – Legacy protocol usage
-        $score = if ($SignIn.ClientAppUsed -match 'imap|pop|smtp|other|unknown') { 2 } else { 0 }
+        # 📡 SR-01: Legacy protocol usage (IMAP/POP/SMTP - no MFA possible)
+        # Points: 3 (per settings.json)
+        $score = if ($SignIn.ClientAppUsed -match 'imap|pop|smtp|other|unknown') { 3 } else { 0 }
         $results += @{ Name = "Legacy protocol (IMAP/POP/SMTP)"; Points = $score }
     }
     catch {
@@ -54,7 +62,8 @@ function Test-SignInBaselineIOCs {
     }
 
     try {
-        # ✅ IOC – Trusted Device (Azure AD joined)
+        # ✅ SR-13: Trusted Device (Azure AD joined) - safety indicator
+        # Points: -2 (per settings.json)
         $score = if ($SignIn.DeviceDetail.TrustType -eq "Azure AD joined") { -2 } else { 0 }
         $results += @{ Name = "Trusted device (AzureAD joined)"; Points = $score }
     }
@@ -63,7 +72,8 @@ function Test-SignInBaselineIOCs {
     }
 
     try {
-        # 🛡️ IOC – Compliant Device
+        # 🛡️ SR-14: Compliant Device (Intune compliant) - safety indicator
+        # Points: -3 (per settings.json)
         $score = if ($SignIn.DeviceDetail.IsCompliant -eq $true) { -3 } else { 0 }
         $results += @{ Name = "Compliant device"; Points = $score }
     }
@@ -72,8 +82,9 @@ function Test-SignInBaselineIOCs {
     }
 
     try {
-        # 🇳🇱 IOC – Location: Netherlands
-        $score = if ($SignIn.Location.CountryOrRegion -in @("NL", "Netherlands")) { -2 } else { 0 }
+        # 🇳🇱 SR-15: Location: Netherlands - sign-in from expected location
+        # Points: -1 (per settings.json)
+        $score = if ($SignIn.Location.CountryOrRegion -in @("NL", "Netherlands")) { -1 } else { 0 }
         $results += @{ Name = "Location: Netherlands"; Points = $score }
     }
     catch {
@@ -81,7 +92,8 @@ function Test-SignInBaselineIOCs {
     }
 
     try {
-        # ⏰ IOC – Login outside inferred working hours
+        # ⏰ SR-08: Login outside inferred working hours
+        # Points: 1 (per settings.json)
         $hour = ([datetime]$SignIn.CreatedDateTime).ToLocalTime().Hour
         $score = if ($hour -lt ($WorkingHours.Start - 2) -or $hour -gt ($WorkingHours.End + 2)) { 1 } else { 0 }
         $results += @{ Name = "Login outside working hours ($($WorkingHours.Start):00–$($WorkingHours.End):00)"; Points = $score }
@@ -91,7 +103,8 @@ function Test-SignInBaselineIOCs {
     }
 
     try {
-        # ✈️ IOC – Impossible travel (flag must be pre-set)
+        # ✈️ SR-07: Impossible travel detection
+        # Points: 4 (per settings.json)
         $score = if ($SignIn.ImpossibleTravelDetected) { 4 } else { 0 }
         $results += @{ Name = "Impossible travel between sign-ins"; Points = $score }
     }

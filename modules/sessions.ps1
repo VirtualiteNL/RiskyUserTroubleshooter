@@ -119,9 +119,9 @@ function Get-SessionAnomalySection {
         $loc = "$($s.Location.City), $($s.Location.CountryOrRegion)"
         $mfaCount = $s.AuthenticationDetails.Count
         $anomalies = @()
-        if ($s.Session_CountryChanged) { $anomalies += "🌍 Country switch" }
-        if ($s.Session_IPChanged)      { $anomalies += "🔁 IP change" }
-        if ($s.Session_DeviceChanged)  { $anomalies += "💻 Device change" }
+        if ($s.Session_CountryChanged) { $anomalies += "Country switch" }
+        if ($s.Session_IPChanged)      { $anomalies += "IP change" }
+        if ($s.Session_DeviceChanged)  { $anomalies += "Device change" }
 
         $html += "<tr>
           <td>$($s.CreatedDateTime)</td>

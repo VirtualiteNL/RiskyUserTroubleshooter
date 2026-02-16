@@ -1,9 +1,14 @@
 # Local API-keys, do not commit or upload
-api/apikey_openai_local.ps1
 api/apikey_abuseipdb_local.ps1
+
+# Claude Code project instructions (local only)
+CLAUDE.md
+
+# macOS metadata files
+.DS_Store
+**/.DS_Store
+
 # Exclude folders that are not needed in the repository
 /logs
 /exports
 /reports
-api/apikey_openai_local1.ps1
-api/apikey_abuseipdb_local1.ps1
